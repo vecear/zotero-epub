@@ -416,27 +416,35 @@ const STYLE_ID = "ze-content-style";
 function buildCss(state: ReaderStyleState): string {
   const parts: string[] = [];
 
-  const bodyDecls: string[] = [];
+  // Font size: scope to root + first-level text elements only.
+  // Using a 'body *' wildcard for em-based scaling would compound
+  // through every nesting level (em is relative to parent), blowing up.
   if (state.fontScale != null) {
     parts.push(`html { font-size: ${state.fontScale}em !important; }`);
-    bodyDecls.push(`font-size: ${state.fontScale}em !important;`);
-  }
-  if (state.lineHeight != null) {
-    bodyDecls.push(`line-height: ${state.lineHeight} !important;`);
-  } else if (state.fontScale != null) {
-    bodyDecls.push(`line-height: 1.6 !important;`);
-  }
-  if (bodyDecls.length > 0) {
     parts.push(
-      `body, p, div, span, li, td, th, blockquote { ${bodyDecls.join(" ")} }`,
+      `html body, html body p, html body div, html body span, html body li, ` +
+        `html body td, html body th, html body blockquote { ` +
+        `font-size: ${state.fontScale}em !important; }`,
     );
   }
 
+  // Line height: unitless multiplier — safe to cascade to all descendants
+  // via 'html body *' (specificity 0,0,3) so EPUB stylesheets that target
+  // '.chapter p' (0,1,1) still lose against our !important.
+  if (state.lineHeight != null) {
+    parts.push(
+      `html, html body, html body * { line-height: ${state.lineHeight} !important; }`,
+    );
+  } else if (state.fontScale != null) {
+    parts.push(
+      `html, html body, html body * { line-height: 1.6 !important; }`,
+    );
+  }
+
+  // Font family: cascade everywhere too — same specificity rationale.
   if (state.fontFamily) {
     parts.push(
-      `body, p, div, span, li, td, th, blockquote, ` +
-        `h1, h2, h3, h4, h5, h6 { ` +
-        `font-family: ${state.fontFamily} !important; }`,
+      `html body, html body * { font-family: ${state.fontFamily} !important; }`,
     );
   }
   return parts.join("\n");
