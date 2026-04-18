@@ -92,14 +92,14 @@ function onRenderToolbar(event: {
     [
       "ze-img-minus",
       "▭−",
-      "縮小圖片 (步進 0.1)",
-      () => adjustImageScale(reader, -0.1),
+      "縮小圖片 (步進 0.025)",
+      () => adjustImageScale(reader, -0.025),
     ],
     [
       "ze-img-plus",
       "▭+",
-      "放大圖片 (步進 0.1)",
-      () => adjustImageScale(reader, +0.1),
+      "放大圖片 (步進 0.025)",
+      () => adjustImageScale(reader, +0.025),
     ],
     ["ze-line-minus", "≡−", "縮小行距", () => adjustLineHeight(reader, -0.1)],
     ["ze-line-plus", "≡+", "放大行距", () => adjustLineHeight(reader, +0.1)],
