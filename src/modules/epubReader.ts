@@ -79,6 +79,8 @@ function onRenderToolbar(event: {
   const buttons: Array<[string, string, string, () => void]> = [
     ["ze-font-minus", "A−", "縮小書本內文字體", () => adjustContentFontSize(reader, -0.1)],
     ["ze-font-plus", "A+", "放大書本內文字體", () => adjustContentFontSize(reader, +0.1)],
+    ["ze-line-minus", "≡−", "縮小行距", () => adjustLineHeight(reader, -0.1)],
+    ["ze-line-plus", "≡+", "放大行距", () => adjustLineHeight(reader, +0.1)],
     ["ze-flow-toggle", "⇅", "切換捲動 / 翻頁模式 (flowMode)", () => toggleFlowMode(reader)],
     ["ze-spread-toggle", "▤", "切換單頁 / 雙頁模式 (spreadMode)", () => toggleSpreadMode(reader)],
   ];
@@ -339,6 +341,7 @@ function appendButton(
 interface ReaderStyleState {
   fontScale?: number;
   fontFamily?: string;
+  lineHeight?: number;
 }
 const readerStyles: Map<number, ReaderStyleState> = new Map();
 
@@ -376,6 +379,24 @@ function adjustContentFontSize(reader: AnyReader, delta: number): void {
   );
 }
 
+function adjustLineHeight(reader: AnyReader, delta: number): void {
+  const handle = getEpubHandle(reader);
+  if (!handle?.contentDocument) {
+    showStatus("無法取得 EPUB 內容 iframe (contentDocument null)");
+    return;
+  }
+  const state = getReaderState(reader.itemID);
+  const current = state.lineHeight ?? 1.6;
+  const next =
+    Math.round(Math.max(1.0, Math.min(2.5, current + delta)) * 100) / 100;
+  state.lineHeight = next;
+
+  const count = applyStyles(handle.contentDocument, state);
+  showStatus(
+    `行距 ${current.toFixed(2)} → ${next.toFixed(2)} (${count} 個文件)`,
+  );
+}
+
 function setContentFontFamily(reader: AnyReader, family: string): void {
   const handle = getEpubHandle(reader);
   if (!handle?.contentDocument) {
@@ -394,14 +415,23 @@ const STYLE_ID = "ze-content-style";
 
 function buildCss(state: ReaderStyleState): string {
   const parts: string[] = [];
+
+  const bodyDecls: string[] = [];
   if (state.fontScale != null) {
     parts.push(`html { font-size: ${state.fontScale}em !important; }`);
+    bodyDecls.push(`font-size: ${state.fontScale}em !important;`);
+  }
+  if (state.lineHeight != null) {
+    bodyDecls.push(`line-height: ${state.lineHeight} !important;`);
+  } else if (state.fontScale != null) {
+    bodyDecls.push(`line-height: 1.6 !important;`);
+  }
+  if (bodyDecls.length > 0) {
     parts.push(
-      `body, p, div, span, li, td, th, blockquote { ` +
-        `font-size: ${state.fontScale}em !important; ` +
-        `line-height: 1.6 !important; }`,
+      `body, p, div, span, li, td, th, blockquote { ${bodyDecls.join(" ")} }`,
     );
   }
+
   if (state.fontFamily) {
     parts.push(
       `body, p, div, span, li, td, th, blockquote, ` +
