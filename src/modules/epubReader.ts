@@ -455,10 +455,10 @@ function applyInlineLineHeightRecursive(doc: Document, lh: string): number {
 
 function sampleComputedLineHeight(doc: Document): string {
   try {
-    // Try a paragraph first (most representative); fall back to body.
     const p = doc.querySelector("p, div, body");
-    if (!p || !doc.defaultView) return "n/a";
-    return doc.defaultView.getComputedStyle(p).lineHeight || "n/a";
+    const view = doc.defaultView;
+    if (!p || !view) return "n/a";
+    return view.getComputedStyle(p as Element).lineHeight || "n/a";
   } catch {
     return "err";
   }
