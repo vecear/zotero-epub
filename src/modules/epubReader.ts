@@ -71,6 +71,8 @@ function onRenderToolbar(event: {
   const { reader, doc, append } = event;
   if (reader.type !== "epub") return;
 
+  ensureToolbarStyles(doc);
+
   // Each button is appended individually — wrapping them in a <div> caused
   // clicks to be swallowed (likely Zotero React toolbar diff replacing the
   // wrapper). Keeping the proven single-button pattern from the probe.
@@ -95,6 +97,54 @@ function onRenderToolbar(event: {
   );
 }
 
+function ensureToolbarStyles(doc: Document): void {
+  const id = "ze-toolbar-styles";
+  if (doc.getElementById(id)) return;
+  const style = doc.createElement("style");
+  style.id = id;
+  style.textContent = `
+    .ze-tb {
+      background: transparent;
+      color: #333;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      padding: 4px 8px;
+      margin: 0 1px;
+      cursor: pointer;
+      font: 13px inherit;
+      min-width: 30px;
+      vertical-align: middle;
+      transition: background-color 0.12s, border-color 0.12s, color 0.12s;
+    }
+    @media (prefers-color-scheme: dark) {
+      .ze-tb { color: #e6e6ec; }
+    }
+    .ze-tb:hover {
+      background-color: rgba(127, 127, 127, 0.22);
+      border-color: rgba(127, 127, 127, 0.4);
+    }
+    .ze-tb:active {
+      background-color: rgba(127, 127, 127, 0.34);
+    }
+    select.ze-tb {
+      padding: 3px 6px;
+      margin-left: 6px;
+      min-width: 110px;
+    }
+    select.ze-tb option {
+      color: #222;
+      background: #fff;
+    }
+    @media (prefers-color-scheme: dark) {
+      select.ze-tb option {
+        color: #e6e6ec;
+        background: #2a2a30;
+      }
+    }
+  `;
+  doc.head?.appendChild(style);
+}
+
 const FONT_OPTIONS: Array<[string, string]> = [
   ["", "預設字型"],
   ['"Microsoft JhengHei", "微軟正黑體", sans-serif', "微軟正黑體"],
@@ -117,10 +167,7 @@ function appendFontFamilySelect(
   const select = doc.createElement("select");
   select.id = "ze-font-family-select";
   select.title = "更換字型";
-  select.style.cssText =
-    "margin-left:6px;padding:2px 6px;font-size:13px;background:transparent;" +
-    "border:1px solid #888;border-radius:3px;color:inherit;cursor:pointer;" +
-    "font-family:inherit;";
+  select.className = "ze-tb";
 
   for (const [value, label] of FONT_OPTIONS) {
     const opt = doc.createElement("option");
@@ -133,9 +180,15 @@ function appendFontFamilySelect(
   const current = getReaderState(reader.itemID).fontFamily ?? "";
   select.value = current;
 
-  select.addEventListener("change", () => {
+  // Some Zotero React-controlled toolbars swallow `change`; bind both events.
+  const onChange = () => {
+    ztoolkit.log(
+      `[${config.addonRef}] font select changed -> ${select.value}`,
+    );
     setContentFontFamily(reader, select.value);
-  });
+  };
+  select.addEventListener("change", onChange);
+  select.addEventListener("input", onChange);
 
   append(select);
 }
@@ -150,12 +203,9 @@ function appendButton(
 ): void {
   const btn = doc.createElement("button");
   btn.id = id;
-  btn.className = "toolbar-button";
+  btn.className = "ze-tb";
   btn.title = title;
   btn.textContent = label;
-  btn.style.cssText =
-    "background:transparent;border:none;cursor:pointer;font-size:14px;" +
-    "padding:4px 8px;color:inherit;font-family:inherit;min-width:30px;";
 
   // Use mousedown as primary trigger — observed from probe button working;
   // some Zotero reader containers swallow click but pass mousedown through.
