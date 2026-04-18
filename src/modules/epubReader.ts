@@ -209,9 +209,16 @@ function appendFontFamilyMenu(
 ): void {
   const btn = doc.createElement("button");
   btn.id = "ze-font-family-btn";
-  btn.className = "toolbar-button ze-tb";
+  // 'toolbar-button' from Zotero is sized as a square icon button
+  // (~30×30); a multi-char label like '字型 ▾' overflows to the right
+  // and shows hover background only on the icon-sized core. Override
+  // with !important so our wider width wins against the host stylesheet.
+  btn.className = "toolbar-button ze-tb ze-tb-wide";
   btn.title = "更換字型";
   btn.type = "button";
+  btn.style.setProperty("min-width", "70px", "important");
+  btn.style.setProperty("width", "auto", "important");
+  btn.style.setProperty("padding", "4px 12px", "important");
 
   const labelOf = (value: string) =>
     FONT_OPTIONS.find((o) => o[0] === value)?.[1] ?? "預設";
