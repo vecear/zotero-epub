@@ -206,15 +206,9 @@ function appendButton(
   btn.className = "ze-tb";
   btn.title = title;
   btn.textContent = label;
+  btn.type = "button"; // prevent any implicit submit / focus-only behavior
 
-  // Use mousedown as primary trigger — observed from probe button working;
-  // some Zotero reader containers swallow click but pass mousedown through.
-  // Lock against double-fire when both events deliver.
-  let lastFired = 0;
-  const fire = (e: Event) => {
-    const now = Date.now();
-    if (now - lastFired < 250) return;
-    lastFired = now;
+  btn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
     try {
@@ -222,9 +216,7 @@ function appendButton(
     } catch (err) {
       showStatus(`Error: ${(err as Error).message ?? err}`);
     }
-  };
-  btn.addEventListener("click", fire);
-  btn.addEventListener("mousedown", fire);
+  });
 
   append(btn);
 }
