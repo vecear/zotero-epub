@@ -391,10 +391,77 @@ function adjustLineHeight(reader: AnyReader, delta: number): void {
     Math.round(Math.max(1.0, Math.min(2.5, current + delta)) * 100) / 100;
   state.lineHeight = next;
 
-  const count = applyStyles(handle.contentDocument, state);
-  showStatus(
-    `行距 ${current.toFixed(2)} → ${next.toFixed(2)} (${count} 個文件)`,
+  // Two-pronged attack: CSS rules (covers future-rendered elements) +
+  // direct inline style on every existing element (highest possible
+  // CSS priority; beats stylesheets and epub.js's own inline styles).
+  const cssCount = applyStyles(handle.contentDocument, state);
+  const inlineCount = applyInlineLineHeightRecursive(
+    handle.contentDocument,
+    String(next),
   );
+
+  const computed = sampleComputedLineHeight(handle.contentDocument);
+  showStatus(
+    `行距 ${current.toFixed(2)} → ${next.toFixed(2)} ` +
+      `(CSS:${cssCount}, inline:${inlineCount}, computed=${computed})`,
+  );
+}
+
+function applyInlineLineHeightRecursive(doc: Document, lh: string): number {
+  let count = 0;
+  try {
+    const root = doc.documentElement as HTMLElement | null;
+    root?.style.setProperty("line-height", lh, "important");
+    const body = doc.body as HTMLElement | null;
+    body?.style.setProperty("line-height", lh, "important");
+
+    const all = doc.body?.querySelectorAll("*") ?? [];
+    all.forEach((el: Element) => {
+      const tag = el.tagName;
+      if (
+        tag === "STYLE" ||
+        tag === "SCRIPT" ||
+        tag === "META" ||
+        tag === "LINK" ||
+        tag === "HEAD"
+      ) {
+        return;
+      }
+      try {
+        (el as HTMLElement).style.setProperty("line-height", lh, "important");
+        count++;
+      } catch {
+        /* element doesn't accept inline style */
+      }
+    });
+  } catch {
+    /* doc inaccessible */
+  }
+  try {
+    const iframes = doc.querySelectorAll("iframe");
+    iframes.forEach((iframe: Element) => {
+      try {
+        const sub = (iframe as HTMLIFrameElement).contentDocument;
+        if (sub) count += applyInlineLineHeightRecursive(sub, lh);
+      } catch {
+        /* cross-origin */
+      }
+    });
+  } catch {
+    /* skip */
+  }
+  return count;
+}
+
+function sampleComputedLineHeight(doc: Document): string {
+  try {
+    // Try a paragraph first (most representative); fall back to body.
+    const p = doc.querySelector("p, div, body");
+    if (!p || !doc.defaultView) return "n/a";
+    return doc.defaultView.getComputedStyle(p).lineHeight || "n/a";
+  } catch {
+    return "err";
+  }
 }
 
 function setContentFontFamily(reader: AnyReader, family: string): void {
