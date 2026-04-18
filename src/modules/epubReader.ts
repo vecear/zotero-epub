@@ -168,6 +168,7 @@ function appendFontFamilySelect(
   select.id = "ze-font-family-select";
   select.title = "更換字型";
   select.className = "ze-tb";
+  select.tabIndex = 0;
 
   for (const [value, label] of FONT_OPTIONS) {
     const opt = doc.createElement("option");
@@ -180,7 +181,24 @@ function appendFontFamilySelect(
   const current = getReaderState(reader.itemID).fontFamily ?? "";
   select.value = current;
 
-  // Some Zotero React-controlled toolbars swallow `change`; bind both events.
+  // Workaround: Zotero React toolbar consumes the first click as focus,
+  // so the dropdown only opens on second click. Force focus on mousedown
+  // (capture phase) so the same gesture both focuses and opens the menu.
+  select.addEventListener(
+    "mousedown",
+    () => {
+      if (doc.activeElement !== select) {
+        try {
+          select.focus({ preventScroll: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    },
+    true,
+  );
+
+  // React-controlled toolbars sometimes drop 'change'; listen to both.
   const onChange = () => {
     ztoolkit.log(
       `[${config.addonRef}] font select changed -> ${select.value}`,
