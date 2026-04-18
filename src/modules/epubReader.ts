@@ -455,11 +455,12 @@ function applyInlineLineHeightRecursive(doc: Document, lh: string): number {
 
 function sampleComputedLineHeight(doc: Document): string {
   try {
-    const el = doc.querySelector("p, div, body");
-    const view = doc.defaultView;
-    if (!el || !view) return "n/a";
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    return view!.getComputedStyle(el as Element).lineHeight || "n/a";
+    // Cast through any to bypass strict null narrowing across try/catch.
+    // Real null cases are caught by the surrounding try/catch.
+    const win = doc.defaultView as any;
+    const el = doc.querySelector("p, div, body") as any;
+    if (!win || !el) return "n/a";
+    return (win.getComputedStyle(el)?.lineHeight as string) || "n/a";
   } catch {
     return "err";
   }
