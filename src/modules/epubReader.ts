@@ -71,46 +71,78 @@ function onRenderToolbar(event: {
   const { reader, doc, append } = event;
   if (reader.type !== "epub") return;
 
-  const containerId = `${config.addonRef}-toolbar-group`;
-  if (doc.getElementById(containerId)) return;
+  // Each button is appended individually — wrapping them in a <div> caused
+  // clicks to be swallowed (likely Zotero React toolbar diff replacing the
+  // wrapper). Keeping the proven single-button pattern from the probe.
+  const buttons: Array<[string, string, string, () => void]> = [
+    ["ze-font-minus", "A−", "縮小書本內文字體", () => adjustContentFontSize(reader, -0.1)],
+    ["ze-font-plus", "A+", "放大書本內文字體", () => adjustContentFontSize(reader, +0.1)],
+    ["ze-flow-toggle", "⇅", "切換捲動 / 翻頁模式 (flowMode)", () => toggleFlowMode(reader)],
+    ["ze-spread-toggle", "▤", "切換單頁 / 雙頁模式 (spreadMode)", () => toggleSpreadMode(reader)],
+  ];
 
-  const container = doc.createElement("div");
-  container.id = containerId;
-  container.style.cssText =
-    "display:inline-flex;gap:4px;margin-left:8px;align-items:center;";
+  for (const [id, label, title, onClick] of buttons) {
+    if (doc.getElementById(id)) continue;
+    appendButton(doc, append, id, label, title, onClick);
+  }
 
-  appendButton(doc, container, "ze-font-minus", "A−", "縮小字體", () =>
-    adjustFontSize(reader, -0.1),
-  );
-  appendButton(doc, container, "ze-font-plus", "A+", "放大字體", () =>
-    adjustFontSize(reader, +0.1),
-  );
-  appendButton(
-    doc,
-    container,
-    "ze-scroll-toggle",
-    "⇅",
-    "切換捲動 / 翻頁模式",
-    () => toggleScrollMode(reader),
-  );
-  appendButton(
-    doc,
-    container,
-    "ze-spread-toggle",
-    "▤",
-    "循環單頁 / 雙頁(odd) / 雙頁(even) 模式",
-    () => cycleSpreadMode(reader),
-  );
+  if (!doc.getElementById("ze-font-family-select")) {
+    appendFontFamilySelect(doc, append, reader);
+  }
 
-  append(container);
   ztoolkit.log(
     `[${config.addonRef}] toolbar attached for EPUB itemID=${reader.itemID}`,
   );
 }
 
+const FONT_OPTIONS: Array<[string, string]> = [
+  ["", "預設字型"],
+  ['"Microsoft JhengHei", "微軟正黑體", sans-serif', "微軟正黑體"],
+  ['"PMingLiU", "新細明體", "MingLiU", serif', "新細明體"],
+  ['"DFKai-SB", "標楷體", "BiauKai", serif', "標楷體"],
+  ['"Source Han Sans TC", "Noto Sans CJK TC", "思源黑體", sans-serif', "思源黑體"],
+  ['"Source Han Serif TC", "Noto Serif CJK TC", "思源宋體", serif', "思源宋體"],
+  ['Georgia, serif', "Georgia"],
+  ['"Times New Roman", Times, serif', "Times New Roman"],
+  ['Arial, Helvetica, sans-serif', "Arial"],
+  ['serif', "系統 Serif"],
+  ['sans-serif', "系統 Sans-serif"],
+];
+
+function appendFontFamilySelect(
+  doc: Document,
+  append: (el: Element) => void,
+  reader: AnyReader,
+): void {
+  const select = doc.createElement("select");
+  select.id = "ze-font-family-select";
+  select.title = "更換字型";
+  select.style.cssText =
+    "margin-left:6px;padding:2px 6px;font-size:13px;background:transparent;" +
+    "border:1px solid #888;border-radius:3px;color:inherit;cursor:pointer;" +
+    "font-family:inherit;";
+
+  for (const [value, label] of FONT_OPTIONS) {
+    const opt = doc.createElement("option");
+    opt.value = value;
+    opt.textContent = label;
+    select.appendChild(opt);
+  }
+
+  // Reflect current state if reader was previously styled
+  const current = getReaderState(reader.itemID).fontFamily ?? "";
+  select.value = current;
+
+  select.addEventListener("change", () => {
+    setContentFontFamily(reader, select.value);
+  });
+
+  append(select);
+}
+
 function appendButton(
   doc: Document,
-  parent: Element,
+  append: (el: Element) => void,
   id: string,
   label: string,
   title: string,
@@ -118,13 +150,21 @@ function appendButton(
 ): void {
   const btn = doc.createElement("button");
   btn.id = id;
+  btn.className = "toolbar-button";
   btn.title = title;
   btn.textContent = label;
   btn.style.cssText =
-    "background:transparent;border:1px solid #888;border-radius:3px;" +
-    "padding:2px 8px;cursor:pointer;font-size:13px;min-width:28px;" +
-    "color:inherit;font-family:inherit;";
-  btn.addEventListener("click", (e) => {
+    "background:transparent;border:none;cursor:pointer;font-size:14px;" +
+    "padding:4px 8px;color:inherit;font-family:inherit;min-width:30px;";
+
+  // Use mousedown as primary trigger — observed from probe button working;
+  // some Zotero reader containers swallow click but pass mousedown through.
+  // Lock against double-fire when both events deliver.
+  let lastFired = 0;
+  const fire = (e: Event) => {
+    const now = Date.now();
+    if (now - lastFired < 250) return;
+    lastFired = now;
     e.preventDefault();
     e.stopPropagation();
     try {
@@ -132,64 +172,167 @@ function appendButton(
     } catch (err) {
       showStatus(`Error: ${(err as Error).message ?? err}`);
     }
-  });
-  parent.appendChild(btn);
+  };
+  btn.addEventListener("click", fire);
+  btn.addEventListener("mousedown", fire);
+
+  append(btn);
 }
 
-function adjustFontSize(reader: AnyReader, delta: number): void {
+/**
+ * Per-reader styling state (keyed by itemID). Holds the values our CSS
+ * injection should reflect; updates here trigger a single style rewrite,
+ * so font-size and font-family won't fight over the same <style> tag.
+ */
+interface ReaderStyleState {
+  fontScale?: number;
+  fontFamily?: string;
+}
+const readerStyles: Map<number, ReaderStyleState> = new Map();
+
+function getReaderState(itemID: number | undefined): ReaderStyleState {
+  const key = itemID ?? -1;
+  let s = readerStyles.get(key);
+  if (!s) {
+    s = {};
+    readerStyles.set(key, s);
+  }
+  return s;
+}
+
+/**
+ * Adjust EPUB content font size by injecting CSS into _primaryView._iframeDocument.
+ * (internalReader.setFontSize was probed earlier and turned out to control the
+ * sidebar / chrome font size, not the actual book content.)
+ */
+function adjustContentFontSize(reader: AnyReader, delta: number): void {
   const handle = getEpubHandle(reader);
-  if (!handle) {
-    showStatus("不是 EPUB reader");
+  if (!handle?.contentDocument) {
+    showStatus("無法取得 EPUB 內容 iframe (contentDocument null)");
     return;
   }
-  const r: any = handle.internalReader;
-  if (typeof r.setFontSize !== "function") {
-    showStatus("setFontSize API 不可用");
-    return;
-  }
-  const current = Number(r._state?.fontSize) || 1;
+
+  const state = getReaderState(reader.itemID);
+  const current = state.fontScale ?? 1;
   const next =
     Math.round(Math.max(0.5, Math.min(2.5, current + delta)) * 100) / 100;
-  r.setFontSize(next);
-  showStatus(`字體 ${current.toFixed(2)} → ${next.toFixed(2)}`);
+  state.fontScale = next;
+
+  const count = applyStyles(handle.contentDocument, state);
+  showStatus(
+    `字體 ${current.toFixed(2)} → ${next.toFixed(2)} (注入到 ${count} 個文件)`,
+  );
+}
+
+function setContentFontFamily(reader: AnyReader, family: string): void {
+  const handle = getEpubHandle(reader);
+  if (!handle?.contentDocument) {
+    showStatus("無法取得 EPUB 內容 iframe (contentDocument null)");
+    return;
+  }
+  const state = getReaderState(reader.itemID);
+  state.fontFamily = family || undefined;
+
+  const count = applyStyles(handle.contentDocument, state);
+  const label = FONT_OPTIONS.find((o) => o[0] === family)?.[1] ?? "預設";
+  showStatus(`字型 → ${label} (${count} 個文件)`);
+}
+
+const STYLE_ID = "ze-content-style";
+
+function buildCss(state: ReaderStyleState): string {
+  const parts: string[] = [];
+  if (state.fontScale != null) {
+    parts.push(`html { font-size: ${state.fontScale}em !important; }`);
+    parts.push(
+      `body, p, div, span, li, td, th, blockquote { ` +
+        `font-size: ${state.fontScale}em !important; ` +
+        `line-height: 1.6 !important; }`,
+    );
+  }
+  if (state.fontFamily) {
+    parts.push(
+      `body, p, div, span, li, td, th, blockquote, ` +
+        `h1, h2, h3, h4, h5, h6 { ` +
+        `font-family: ${state.fontFamily} !important; }`,
+    );
+  }
+  return parts.join("\n");
+}
+
+function applyStyles(doc: Document, state: ReaderStyleState): number {
+  return injectStyleRecursive(doc, buildCss(state));
+}
+
+function injectStyleRecursive(doc: Document, css: string): number {
+  let count = 0;
+  try {
+    let style = doc.getElementById(STYLE_ID) as HTMLStyleElement | null;
+    if (!style) {
+      style = doc.createElement("style");
+      style.id = STYLE_ID;
+      doc.head?.appendChild(style);
+    }
+    style.textContent = css;
+    count++;
+  } catch {
+    /* skip this doc */
+  }
+  try {
+    const iframes = doc.querySelectorAll("iframe");
+    iframes.forEach((iframe: Element) => {
+      try {
+        const sub = (iframe as HTMLIFrameElement).contentDocument;
+        if (sub) count += injectStyleRecursive(sub, css);
+      } catch {
+        /* cross-origin or detached */
+      }
+    });
+  } catch {
+    /* skip */
+  }
+  return count;
 }
 
 /**
- * Toggle scrollMode. We don't yet know whether Zotero 9 exposes a setter,
- * a setScrollMode method, or expects _updateState({...}) — try all three.
+ * Toggle EPUB flow mode between paginated and scrolled.
+ * (scrollMode is for PDFs; EPUB uses flowMode = "paginated" | "scrolled".)
  */
-function toggleScrollMode(reader: AnyReader): void {
+function toggleFlowMode(reader: AnyReader): void {
   const handle = getEpubHandle(reader);
   if (!handle) {
     showStatus("不是 EPUB reader");
     return;
   }
   const r: any = handle.internalReader;
-  const before = r.scrollMode;
-  const target = !before;
+  const before = r.flowMode;
+  const target = before === "paginated" ? "scrolled" : "paginated";
 
-  const path = applyState(r, "scrollMode", target);
-  const after = r.scrollMode;
-  showStatus(`scrollMode ${before} → ${after} (${path})`);
+  const path = applyState(r, "flowMode", target);
+  const after = r.flowMode;
+  showStatus(`flowMode "${before}" → "${after}" (${path})`);
 }
 
 /**
- * Cycle spreadMode through 0 → 1 → 2 → 0.
- * (PDF.js convention: 0=single, 1=odd-spreads, 2=even-spreads.)
+ * Toggle spreadMode between 0 and 1 (single ↔ double-page).
+ * Earlier cycle through 0/1/2 failed past 1 — Zotero may only support 0/1.
  */
-function cycleSpreadMode(reader: AnyReader): void {
+function toggleSpreadMode(reader: AnyReader): void {
   const handle = getEpubHandle(reader);
   if (!handle) {
     showStatus("不是 EPUB reader");
     return;
   }
   const r: any = handle.internalReader;
-  const before = Number(r.spreadMode) || 0;
-  const target = (before + 1) % 3;
+  const before = r.spreadMode;
+  const target =
+    typeof before === "number" ? (before === 0 ? 1 : 0) : !before;
 
   const path = applyState(r, "spreadMode", target);
   const after = r.spreadMode;
-  showStatus(`spreadMode ${before} → ${after} (${path})`);
+  showStatus(
+    `spreadMode ${JSON.stringify(before)} → ${JSON.stringify(after)} (${path})`,
+  );
 }
 
 /**
