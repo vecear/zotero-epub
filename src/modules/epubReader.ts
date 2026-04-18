@@ -111,7 +111,8 @@ function ensureToolbarStyles(doc: Document): void {
       padding: 4px 8px;
       margin: 0 1px;
       cursor: pointer;
-      font: 13px inherit;
+      font-size: 13px;
+      font-family: inherit;
       min-width: 30px;
       vertical-align: middle;
       transition: background-color 0.12s, border-color 0.12s, color 0.12s;
@@ -128,16 +129,20 @@ function ensureToolbarStyles(doc: Document): void {
     }
     .ze-font-menu {
       position: fixed;
-      z-index: 99999;
+      z-index: 999999;
       background: #fff;
       color: #222;
       border: 1px solid #888;
       border-radius: 4px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-      min-width: 160px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+      min-width: 180px;
+      max-width: 320px;
       max-height: 60vh;
       overflow-y: auto;
       padding: 4px 0;
+      display: flex;
+      flex-direction: column;
+      box-sizing: border-box;
     }
     @media (prefers-color-scheme: dark) {
       .ze-font-menu {
@@ -150,12 +155,15 @@ function ensureToolbarStyles(doc: Document): void {
       display: block;
       width: 100%;
       text-align: left;
-      padding: 6px 14px;
+      padding: 6px 16px;
       border: none;
       background: transparent;
       cursor: pointer;
-      font: 13px inherit;
+      font-size: 13px;
+      font-family: inherit;
       color: inherit;
+      white-space: nowrap;
+      box-sizing: border-box;
     }
     .ze-font-menu-item:hover {
       background: rgba(127, 127, 127, 0.22);
