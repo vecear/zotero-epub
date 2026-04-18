@@ -77,8 +77,8 @@ function onRenderToolbar(event: {
   // clicks to be swallowed (likely Zotero React toolbar diff replacing the
   // wrapper). Keeping the proven single-button pattern from the probe.
   const buttons: Array<[string, string, string, () => void]> = [
-    ["ze-font-minus", "A−", "縮小書本內文字體", () => adjustContentFontSize(reader, -0.1)],
-    ["ze-font-plus", "A+", "放大書本內文字體", () => adjustContentFontSize(reader, +0.1)],
+    ["ze-font-minus", "A−", "縮小書本內文字體 (步進 0.05)", () => adjustContentFontSize(reader, -0.05)],
+    ["ze-font-plus", "A+", "放大書本內文字體 (步進 0.05)", () => adjustContentFontSize(reader, +0.05)],
     ["ze-line-minus", "≡−", "縮小行距", () => adjustLineHeight(reader, -0.1)],
     ["ze-line-plus", "≡+", "放大行距", () => adjustLineHeight(reader, +0.1)],
     ["ze-flow-toggle", "⇅", "切換捲動 / 翻頁模式 (flowMode)", () => toggleFlowMode(reader)],
@@ -467,12 +467,12 @@ function adjustContentFontSize(reader: AnyReader, delta: number): void {
   const settings = getSettings();
   const current = settings.fontScale ?? 1;
   const next =
-    Math.round(Math.max(0.5, Math.min(2.5, current + delta)) * 100) / 100;
+    Math.round(Math.max(0.5, Math.min(2.5, current + delta)) * 1000) / 1000;
   prefSetFloat(PREF_FONT_SCALE, next);
 
   const count = applyStyles(handle.contentDocument, getSettings());
   showStatus(
-    `字體 ${current.toFixed(2)} → ${next.toFixed(2)} (注入到 ${count} 個文件)`,
+    `字體 ${current.toFixed(3)} → ${next.toFixed(3)} (注入到 ${count} 個文件)`,
   );
 }
 
