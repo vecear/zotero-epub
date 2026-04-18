@@ -621,6 +621,8 @@ function applyInlineImageZoomRecursive(doc: Document, zoom: number): number {
         // ever wrote on this element, including the cached width.
         if (zoom === 1) {
           html.style.removeProperty("zoom");
+          html.style.removeProperty("max-width");
+          html.style.removeProperty("max-height");
           if (html.dataset.zeOrigW) {
             html.style.removeProperty("width");
             html.style.removeProperty("height");
@@ -630,12 +632,16 @@ function applyInlineImageZoomRecursive(doc: Document, zoom: number): number {
           return;
         }
 
-        // Belt: layout-aware zoom (works for elements that respect it).
+        // Belt: layout-aware zoom.
         html.style.setProperty("zoom", String(zoom), "important");
+        // Suspenders: max-width/height: none so any EPUB-set ceiling
+        // ('img { max-width: 100% }') doesn't clamp the new size.
+        html.style.setProperty("max-width", "none", "important");
+        html.style.setProperty("max-height", "none", "important");
 
-        // Braces: cache the element's original rendered width once and
-        // force inline width = original × zoom. Beats EPUB stylesheets
-        // that pin 'img { width: 100% !important }' or similar.
+        // Belt: cache the element's natural/original rendered width
+        // once, then force inline width = original × zoom. Beats EPUB
+        // stylesheets that pin 'img { width: 100% !important }'.
         let origW = parseFloat(html.dataset.zeOrigW ?? "");
         if (!Number.isFinite(origW) || origW <= 0) {
           if (el.tagName === "IMG") {
