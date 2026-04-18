@@ -1,7 +1,7 @@
 {
   "name": "zotero-epub",
   "type": "module",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "A Zotero 9 plugin that brings PDF-like EPUB reading: virtual pagination, font/layout controls, dual-page mode, and bookmarks.",
   "config": {
     "addonName": "Zotero EPUB Reader",

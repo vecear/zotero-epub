@@ -95,9 +95,46 @@ function onRenderToolbar(event: {
     appendFontFamilyMenu(doc, append, reader);
   }
 
+  // Auto-apply persisted GLOBAL settings to this reader once the EPUB
+  // view has finished initializing. Wait on the view's own promise so
+  // we don't try to inject CSS into an empty document.
+  applyPersistedSettings(reader);
+
   ztoolkit.log(
     `[${config.addonRef}] toolbar attached for EPUB itemID=${reader.itemID}`,
   );
+}
+
+function applyPersistedSettings(reader: AnyReader): void {
+  const handle = getEpubHandle(reader);
+  if (!handle) return;
+  const settings = getSettings();
+  if (
+    settings.fontScale == null &&
+    settings.lineHeight == null &&
+    settings.fontFamily == null
+  ) {
+    return;
+  }
+
+  const apply = () => {
+    const h = getEpubHandle(reader);
+    if (!h?.contentDocument) return;
+    applyStyles(h.contentDocument, settings);
+    if (settings.lineHeight != null) {
+      applyInlineLineHeightRecursive(
+        h.contentDocument,
+        String(settings.lineHeight),
+      );
+    }
+  };
+
+  const initPromise = handle.primaryView?.initializedPromise;
+  if (initPromise && typeof initPromise.then === "function") {
+    initPromise.then(() => setTimeout(apply, 50)).catch(() => apply());
+  } else {
+    setTimeout(apply, 200);
+  }
 }
 
 function ensureToolbarStyles(doc: Document): void {
@@ -226,7 +263,7 @@ function appendFontFamilyMenu(
   const labelOf = (value: string) =>
     FONT_OPTIONS.find((o) => o[0] === value)?.[1] ?? "預設";
   const refreshLabel = () => {
-    const cur = getReaderState(reader.itemID).fontFamily ?? "";
+    const cur = getSettings().fontFamily ?? "";
     btn.textContent = "字型 ▾";
     btn.title = `更換字型 (目前: ${labelOf(cur)})`;
   };
@@ -253,7 +290,7 @@ function appendFontFamilyMenu(
     m.style.top = `${rect.bottom + 2}px`;
     m.style.left = `${rect.left}px`;
 
-    const currentValue = getReaderState(reader.itemID).fontFamily ?? "";
+    const currentValue = getSettings().fontFamily ?? "";
     for (const [value, label] of FONT_OPTIONS) {
       const item = doc.createElement("button");
       item.type = "button";
@@ -336,32 +373,68 @@ function appendButton(
 }
 
 /**
- * Per-reader styling state (keyed by itemID). Holds the values our CSS
- * injection should reflect; updates here trigger a single style rewrite,
- * so font-size and font-family won't fight over the same <style> tag.
+ * Persisted style settings — GLOBAL across all EPUB readers, stored in
+ * Zotero.Prefs under `${config.prefsPrefix}.{key}` (extensions.zotero
+ * .zotero-epub.{key}). Changes survive Zotero restarts and are shared
+ * by every EPUB the user opens.
  */
 interface ReaderStyleState {
   fontScale?: number;
   fontFamily?: string;
   lineHeight?: number;
 }
-const readerStyles: Map<number, ReaderStyleState> = new Map();
+
+const PREF_FONT_SCALE = `${config.prefsPrefix}.fontScale`;
+const PREF_LINE_HEIGHT = `${config.prefsPrefix}.lineHeight`;
+const PREF_FONT_FAMILY = `${config.prefsPrefix}.fontFamily`;
+
+function prefGet(key: string): unknown {
+  try {
+    return (Zotero as any).Prefs.get(key, true);
+  } catch {
+    return undefined;
+  }
+}
+function prefSet(key: string, value: number | string): void {
+  try {
+    (Zotero as any).Prefs.set(key, value, true);
+  } catch {
+    /* ignore */
+  }
+}
+function prefClear(key: string): void {
+  try {
+    (Zotero as any).Prefs.clear(key, true);
+  } catch {
+    /* ignore */
+  }
+}
+
+function getSettings(): ReaderStyleState {
+  const fontScale = prefGet(PREF_FONT_SCALE);
+  const lineHeight = prefGet(PREF_LINE_HEIGHT);
+  const fontFamily = prefGet(PREF_FONT_FAMILY);
+  return {
+    fontScale: typeof fontScale === "number" ? fontScale : undefined,
+    lineHeight: typeof lineHeight === "number" ? lineHeight : undefined,
+    fontFamily:
+      typeof fontFamily === "string" && fontFamily.length > 0
+        ? fontFamily
+        : undefined,
+  };
+}
+
+function clearAllSettings(): void {
+  prefClear(PREF_FONT_SCALE);
+  prefClear(PREF_LINE_HEIGHT);
+  prefClear(PREF_FONT_FAMILY);
+}
 
 /**
  * Per-reader hooks to refresh derived UI (e.g. font dropdown label).
  * Populated when the reader's toolbar is built; called on reset.
  */
 const readerLabelRefreshers: Map<number, () => void> = new Map();
-
-function getReaderState(itemID: number | undefined): ReaderStyleState {
-  const key = itemID ?? -1;
-  let s = readerStyles.get(key);
-  if (!s) {
-    s = {};
-    readerStyles.set(key, s);
-  }
-  return s;
-}
 
 /**
  * Adjust EPUB content font size by injecting CSS into _primaryView._iframeDocument.
@@ -375,13 +448,13 @@ function adjustContentFontSize(reader: AnyReader, delta: number): void {
     return;
   }
 
-  const state = getReaderState(reader.itemID);
-  const current = state.fontScale ?? 1;
+  const settings = getSettings();
+  const current = settings.fontScale ?? 1;
   const next =
     Math.round(Math.max(0.5, Math.min(2.5, current + delta)) * 100) / 100;
-  state.fontScale = next;
+  prefSet(PREF_FONT_SCALE, next);
 
-  const count = applyStyles(handle.contentDocument, state);
+  const count = applyStyles(handle.contentDocument, getSettings());
   showStatus(
     `字體 ${current.toFixed(2)} → ${next.toFixed(2)} (注入到 ${count} 個文件)`,
   );
@@ -393,21 +466,17 @@ function adjustLineHeight(reader: AnyReader, delta: number): void {
     showStatus("無法取得 EPUB 內容 iframe (contentDocument null)");
     return;
   }
-  const state = getReaderState(reader.itemID);
-  const current = state.lineHeight ?? 1.6;
+  const settings = getSettings();
+  const current = settings.lineHeight ?? 1.6;
   const next =
     Math.round(Math.max(1.0, Math.min(2.5, current + delta)) * 100) / 100;
-  state.lineHeight = next;
+  prefSet(PREF_LINE_HEIGHT, next);
 
-  // Two-pronged attack: CSS rules (covers future-rendered elements) +
-  // direct inline style on every existing element (highest possible
-  // CSS priority; beats stylesheets and epub.js's own inline styles).
-  const cssCount = applyStyles(handle.contentDocument, state);
+  const cssCount = applyStyles(handle.contentDocument, getSettings());
   const inlineCount = applyInlineLineHeightRecursive(
     handle.contentDocument,
     String(next),
   );
-
   const computed = sampleComputedLineHeight(handle.contentDocument);
   showStatus(
     `行距 ${current.toFixed(2)} → ${next.toFixed(2)} ` +
@@ -512,8 +581,8 @@ function resetAllSettings(reader: AnyReader): void {
   }
   const itemID = reader.itemID ?? -1;
 
-  // 1. Forget per-reader styling state.
-  readerStyles.delete(itemID);
+  // 1. Wipe global persisted settings.
+  clearAllSettings();
 
   let inlineCleared = 0;
   if (handle.contentDocument) {
@@ -539,8 +608,8 @@ function resetAllSettings(reader: AnyReader): void {
   readerLabelRefreshers.get(itemID)?.();
 
   showStatus(
-    `已重置 (line-height inline 清除: ${inlineCleared}, ` +
-      `flowMode: ${flowPath}, spreadMode: ${spreadPath})`,
+    `已重置全域設定 (inline 清除:${inlineCleared}, ` +
+      `flowMode:${flowPath}, spreadMode:${spreadPath})`,
   );
 }
 
@@ -563,10 +632,10 @@ function setContentFontFamily(reader: AnyReader, family: string): void {
     showStatus("無法取得 EPUB 內容 iframe (contentDocument null)");
     return;
   }
-  const state = getReaderState(reader.itemID);
-  state.fontFamily = family || undefined;
+  if (family) prefSet(PREF_FONT_FAMILY, family);
+  else prefClear(PREF_FONT_FAMILY);
 
-  const count = applyStyles(handle.contentDocument, state);
+  const count = applyStyles(handle.contentDocument, getSettings());
   const label = FONT_OPTIONS.find((o) => o[0] === family)?.[1] ?? "預設";
   showStatus(`字型 → ${label} (${count} 個文件)`);
 }
