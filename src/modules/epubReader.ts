@@ -77,15 +77,50 @@ function onRenderToolbar(event: {
   // clicks to be swallowed (likely Zotero React toolbar diff replacing the
   // wrapper). Keeping the proven single-button pattern from the probe.
   const buttons: Array<[string, string, string, () => void]> = [
-    ["ze-font-minus", "A−", "字級 −1 px (相對 EPUB 原始大小，可精確互相抵銷)", () => adjustContentFontSize(reader, -1)],
-    ["ze-font-plus", "A+", "字級 +1 px (相對 EPUB 原始大小，可精確互相抵銷)", () => adjustContentFontSize(reader, +1)],
-    ["ze-img-minus", "▭−", "縮小圖片 (步進 0.1)", () => adjustImageScale(reader, -0.1)],
-    ["ze-img-plus", "▭+", "放大圖片 (步進 0.1)", () => adjustImageScale(reader, +0.1)],
+    [
+      "ze-font-minus",
+      "A−",
+      "字級 −1 px (相對 EPUB 原始大小，可精確互相抵銷)",
+      () => adjustContentFontSize(reader, -1),
+    ],
+    [
+      "ze-font-plus",
+      "A+",
+      "字級 +1 px (相對 EPUB 原始大小，可精確互相抵銷)",
+      () => adjustContentFontSize(reader, +1),
+    ],
+    [
+      "ze-img-minus",
+      "▭−",
+      "縮小圖片 (步進 0.1)",
+      () => adjustImageScale(reader, -0.1),
+    ],
+    [
+      "ze-img-plus",
+      "▭+",
+      "放大圖片 (步進 0.1)",
+      () => adjustImageScale(reader, +0.1),
+    ],
     ["ze-line-minus", "≡−", "縮小行距", () => adjustLineHeight(reader, -0.1)],
     ["ze-line-plus", "≡+", "放大行距", () => adjustLineHeight(reader, +0.1)],
-    ["ze-flow-toggle", "⇅", "切換捲動 / 翻頁模式 (flowMode)", () => toggleFlowMode(reader)],
-    ["ze-spread-toggle", "▤", "切換單頁 / 雙頁模式 (spreadMode)", () => toggleSpreadMode(reader)],
-    ["ze-reset", "↺", "重置所有自訂設定 (字體/圖片/行距/字型/版面模式)", () => resetAllSettings(reader)],
+    [
+      "ze-flow-toggle",
+      "⇅",
+      "切換捲動 / 翻頁模式 (flowMode)",
+      () => toggleFlowMode(reader),
+    ],
+    [
+      "ze-spread-toggle",
+      "▤",
+      "切換單頁 / 雙頁模式 (spreadMode)",
+      () => toggleSpreadMode(reader),
+    ],
+    [
+      "ze-reset",
+      "↺",
+      "重置所有自訂設定 (字體/圖片/行距/字型/版面模式)",
+      () => resetAllSettings(reader),
+    ],
   ];
 
   for (const [id, label, title, onClick] of buttons) {
@@ -230,13 +265,16 @@ const FONT_OPTIONS: Array<[string, string]> = [
   ['"Microsoft JhengHei", "微軟正黑體", sans-serif', "微軟正黑體"],
   ['"PMingLiU", "新細明體", "MingLiU", serif', "新細明體"],
   ['"DFKai-SB", "標楷體", "BiauKai", serif', "標楷體"],
-  ['"Source Han Sans TC", "Noto Sans CJK TC", "思源黑體", sans-serif', "思源黑體"],
+  [
+    '"Source Han Sans TC", "Noto Sans CJK TC", "思源黑體", sans-serif',
+    "思源黑體",
+  ],
   ['"Source Han Serif TC", "Noto Serif CJK TC", "思源宋體", serif', "思源宋體"],
-  ['Georgia, serif', "Georgia"],
+  ["Georgia, serif", "Georgia"],
   ['"Times New Roman", Times, serif', "Times New Roman"],
-  ['Arial, Helvetica, sans-serif', "Arial"],
-  ['serif', "系統 Serif"],
-  ['sans-serif', "系統 Sans-serif"],
+  ["Arial, Helvetica, sans-serif", "Arial"],
+  ["serif", "系統 Serif"],
+  ["sans-serif", "系統 Sans-serif"],
 ];
 
 /**
@@ -528,10 +566,7 @@ const FONT_SIZE_TARGETS = new Set([
   "FIGCAPTION",
 ]);
 
-function applyInlineFontSizeRecursive(
-  doc: Document,
-  offsetPx: number,
-): number {
+function applyInlineFontSizeRecursive(doc: Document, offsetPx: number): number {
   let count = 0;
   try {
     const view = (doc as any).defaultView;
@@ -607,6 +642,28 @@ function adjustImageScale(reader: AnyReader, delta: number): void {
     `圖片 ${current.toFixed(2)} → ${next.toFixed(2)} ` +
       `(CSS:${cssCount}, inline:${inlineCount})`,
   );
+
+  // Self-diagnostic: if we touched 0 images but the user expected a
+  // change, surface why. Triggers only on "no-op" failure to keep
+  // normal usage popup-free.
+  if (inlineCount === 0 && next !== 1) {
+    const doc = handle.contentDocument;
+    const iframes = doc.querySelectorAll("iframe").length;
+    try {
+      (Zotero as any)
+        .getMainWindow()
+        ?.alert(
+          `[zotero-epub] 圖片縮放套用失敗：找不到 <img>/<svg>/<video>。\n\n` +
+            `這頁可能沒有圖片，或圖片在無法存取的 iframe / shadow DOM。\n` +
+            `imageScale: ${next}\n` +
+            `body 存在: ${!!doc.body}\n` +
+            `nested iframes: ${iframes}\n` +
+            `把這段訊息貼回 Claude 以便診斷。`,
+        );
+    } catch {
+      /* alert is best-effort */
+    }
+  }
 }
 
 function applyInlineImageZoomRecursive(doc: Document, zoom: number): number {
@@ -971,8 +1028,7 @@ function toggleSpreadMode(reader: AnyReader): void {
   }
   const r: any = handle.internalReader;
   const before = r.spreadMode;
-  const target =
-    typeof before === "number" ? (before === 0 ? 1 : 0) : !before;
+  const target = typeof before === "number" ? (before === 0 ? 1 : 0) : !before;
 
   const path = applyState(r, "spreadMode", target);
   const after = r.spreadMode;
