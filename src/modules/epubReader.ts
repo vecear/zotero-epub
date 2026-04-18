@@ -661,21 +661,20 @@ const STYLE_ID = "ze-content-style";
 function buildCss(state: ReaderStyleState): string {
   const parts: string[] = [];
 
-  // Font size: set ONLY on html (root). EPUBs that use em/rem-based
-  // typography — most modern ones — will then cascade the new base
-  // through inheritance without compounding. Setting on body too
-  // multiplied 1.2 × 1.2 = 1.44 in the previous version. Setting
-  // 'zoom' on body broke layout because Zotero's column/pagination
-  // viewport doesn't rescale alongside it.
+  // Font + media size: zoom each direct child of body. Why this
+  // particular shape:
+  //
+  // - 'html { font-size: Xem }' alone failed on image-heavy chapters
+  //   whose EPUB stylesheets use fixed px font sizes (px doesn't
+  //   inherit the new root size).
+  // - 'body { zoom: X }' rescaled the layout box but Zotero's column
+  //   viewport stayed put, so content overflowed.
+  // - 'body > * { zoom: X }' rescales each chapter wrapper (text,
+  //   images, padding all together — zoom is layout-aware), and
+  //   because we don't list nested elements there's no compounding
+  //   regardless of how deeply the EPUB nests its DOM.
   if (state.fontScale != null) {
-    parts.push(`html { font-size: ${state.fontScale}em !important; }`);
-    // Scale embedded media to the same factor — they don't inherit
-    // text scale, so without this they'd stay at original size.
-    parts.push(
-      `html body img, html body svg, html body video, ` +
-        `html body picture, html body canvas { ` +
-        `zoom: ${state.fontScale} !important; }`,
-    );
+    parts.push(`html body > * { zoom: ${state.fontScale} !important; }`);
   }
 
   // Line height: unitless multiplier — safe to cascade to all descendants
