@@ -410,13 +410,29 @@ function prefClear(key: string): void {
   }
 }
 
+/**
+ * Floats stored as strings — Zotero.Prefs.set routes typeof === 'number'
+ * to setIntPref, which truncates 1.2 to 1, making 0.1-step adjustments
+ * round-trip to a no-op. Store as string, parse on read.
+ */
+function prefSetFloat(key: string, value: number): void {
+  prefSet(key, String(value));
+}
+function prefGetFloat(key: string): number | undefined {
+  const v = prefGet(key);
+  if (typeof v === "number") return v;
+  if (typeof v === "string" && v.length > 0) {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return undefined;
+}
+
 function getSettings(): ReaderStyleState {
-  const fontScale = prefGet(PREF_FONT_SCALE);
-  const lineHeight = prefGet(PREF_LINE_HEIGHT);
   const fontFamily = prefGet(PREF_FONT_FAMILY);
   return {
-    fontScale: typeof fontScale === "number" ? fontScale : undefined,
-    lineHeight: typeof lineHeight === "number" ? lineHeight : undefined,
+    fontScale: prefGetFloat(PREF_FONT_SCALE),
+    lineHeight: prefGetFloat(PREF_LINE_HEIGHT),
     fontFamily:
       typeof fontFamily === "string" && fontFamily.length > 0
         ? fontFamily
@@ -452,7 +468,7 @@ function adjustContentFontSize(reader: AnyReader, delta: number): void {
   const current = settings.fontScale ?? 1;
   const next =
     Math.round(Math.max(0.5, Math.min(2.5, current + delta)) * 100) / 100;
-  prefSet(PREF_FONT_SCALE, next);
+  prefSetFloat(PREF_FONT_SCALE, next);
 
   const count = applyStyles(handle.contentDocument, getSettings());
   showStatus(
@@ -470,7 +486,7 @@ function adjustLineHeight(reader: AnyReader, delta: number): void {
   const current = settings.lineHeight ?? 1.6;
   const next =
     Math.round(Math.max(1.0, Math.min(2.5, current + delta)) * 100) / 100;
-  prefSet(PREF_LINE_HEIGHT, next);
+  prefSetFloat(PREF_LINE_HEIGHT, next);
 
   const cssCount = applyStyles(handle.contentDocument, getSettings());
   const inlineCount = applyInlineLineHeightRecursive(
