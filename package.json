@@ -5,10 +5,10 @@
   "description": "A Zotero 9 plugin that brings PDF-like EPUB reading: virtual pagination, font/layout controls, dual-page mode, and bookmarks.",
   "config": {
     "addonName": "Zotero EPUB Reader",
-    "addonID": "zotero-epub@vecear.com",
-    "addonRef": "zoteroepub",
-    "addonInstance": "ZoteroEPUB",
-    "prefsPrefix": "extensions.zotero.zoteroepub"
+    "addonID": "zotero-epub@vecear.github.io",
+    "addonRef": "zotero-epub",
+    "addonInstance": "ZoteroEpub",
+    "prefsPrefix": "extensions.zotero.zotero-epub"
   },
   "repository": {
     "type": "git",
