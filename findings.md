@@ -180,3 +180,98 @@ Zotero.Reader.registerEventListener("renderToolbar", (event) => {
 3. 確認 rendition / book / locations 的實際存取路徑
 4. 寫 `src/modules/epubReader.ts` 封裝 `getEpubView(reader)` helper
 5. 加一個 toolbar button 當作 hook 起點，點擊顯示分頁資訊 dialog
+
+---
+
+## 9. Runtime Probe 結果（2026-04-18，Zotero 9）
+
+**重大修正**：不必 hack epub.js，Zotero 9 Reader 已暴露豐富原生 API。
+
+### 9.1 實際物件結構
+
+```
+reader (ReaderTab)
+├── type: "epub"
+├── _iframeWindow: Zotero reader shell (resource://zotero/reader/reader.html)
+│                  ↑ 這不是書本內容 iframe！
+└── _internalReader: Reader instance (src/common/reader.js)
+    ├── _primaryView: EPUBView instance (ctor=epub_view_EPUBView) ★
+    │   ├── _container, _iframe, _iframeWindow, _iframeDocument ← 真正的書本 iframe
+    │   ├── _annotations, _annotationsByID, _showAnnotations
+    │   ├── _theme, _lightTheme, _darkTheme, _colorScheme
+    │   ├── _findState
+    │   ├── _history
+    │   └── initializedPromise
+    ├── _secondaryView: EPUBView | null (split view)
+    ├── _state: 統一狀態物件
+    ├── _focusManager, _keyboardManager, _annotationManager
+    ├── _tools
+    └── _splitViewContainer, _primaryViewContainer, _secondaryViewContainer
+```
+
+### 9.2 原生 API 寶庫（Reader.prototype）
+
+**版面 / 外觀**：
+- `setFontSize(size)` — 字體大小
+- `setFontFamily(family)` — 字型
+- `setHyphenate(bool)` — 斷字
+- `setLightTheme(theme)`, `setDarkTheme(theme)`, `setColorScheme(scheme)`
+- `setCustomThemes(arr)`
+
+**顯示模式**（我們 M3 的核心，原生支援！）：
+- `scrollMode` — getter, 捲動模式
+- `flowMode` — getter, 流動模式（PaginatedFlow / ScrollFlow）
+- `spreadMode` — getter, **雙頁/單頁模式**
+- 對應 setter 用 `_updateState({scrollMode, flowMode, spreadMode})` 或直接賦值（M3 要驗證）
+
+**縮放**：
+- `zoomIn`, `zoomOut`, `zoomReset`, `zoomAuto`
+- `zoomPageWidth`, `zoomPageHeight`
+
+**導航**：
+- `navigate(location)` — location 是 CFI 或 page label
+- `navigateBack`, `navigateForward`
+- `navigateToFirstPage`, `navigateToLastPage`
+- `navigateToPreviousPage`, `navigateToNextPage`
+- `navigateToPreviousSection`, `navigateToNextSection`
+- `canNavigateToFirstPage` / `canNavigateToNextPage` 等 boolean getter
+
+**註解**（M5 書籤寄生）：
+- `setAnnotations(items)`, `unsetAnnotations(keys)`
+- `deleteAnnotations`, `convertAnnotations`, `mergeAnnotations`
+- `getUnsavedAnnotations`
+- `importAnnotationsFromKOReaderMetadata`, `importAnnotationsFromCalibreMetadata`
+
+**搜尋**（M6）：
+- `findNext`, `findPrevious`, `toggleFindPopup`
+
+**UI 控制**：
+- `toggleSidebar`, `setSidebarView`, `setSidebarWidth`
+- `toggleHorizontalSplit`, `toggleVerticalSplit`, `splitType`, `disableSplitView`
+- `toggleAppearancePopup`（Zotero 9 內建 Appearance panel，我們可做為整合點）
+- `setContextPaneOpen`, `setBottomPlaceholderHeight`
+- `focus`, `focusView`, `focusToolbar`
+- `freeze`, `unfreeze` — 凍結渲染以利批次改動
+
+**Read Aloud**（Zotero 9 新功能，本專案可忽略）：
+- `toggleReadAloudPopup`, `toggleReadAloudPaused`
+
+### 9.3 策略大翻修
+
+**原本想法**：自己用 epub.js rendition.hooks.content 注入 CSS、book.locations.generate 算頁、DOM iframe 手動處理。
+
+**新想法**：直接呼叫 `internalReader.set*()` / `navigate*()` / `toggle*()`，把我們的 plugin 定位為「Zotero 9 Reader 的 UI 擴充層」：
+- M3 **顯示模式切換**：包 toolbar 按鈕 → `scrollMode` / `flowMode` / `spreadMode` toggle
+- M4 **字體/版面面板**：呼叫 `setFontSize` / `setFontFamily` / `setHyphenate`；CSS 細節可注入到 `_primaryView._iframeDocument`
+- M5 **書籤**：用 `setAnnotations` + 自訂 type 區分一般標註與書籤
+- M6 **搜尋**：已有 `findNext` / `toggleFindPopup`
+
+**仍要自己做的**：
+- 虛擬頁碼 UI（原生有 `navigateToNextPage`，但頁碼顯示可能需要自算）
+- 跳頁輸入框（需知 navigate 接受格式）
+- 書籤樹側邊面板 UI
+- 繁中字型優化 CSS 注入
+
+### 9.4 下一波 MVP（M3 phase 2）
+
+改 probe button：按下去後呼叫 `setFontSize` 和 `scrollMode` toggle，驗證 API 實際行為；確認後寫正式 UI 面板。
