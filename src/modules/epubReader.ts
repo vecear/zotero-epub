@@ -661,12 +661,21 @@ const STYLE_ID = "ze-content-style";
 function buildCss(state: ReaderStyleState): string {
   const parts: string[] = [];
 
-  // Font + media size: apply 'zoom' once on html body. zoom rescales
-  // the entire layout box (text, images, padding, margins) by the
-  // factor in lock-step, so figure/photo dimensions match the text
-  // growth exactly — no compounded em stacking, no separate img rule.
+  // Font size: set ONLY on html (root). EPUBs that use em/rem-based
+  // typography — most modern ones — will then cascade the new base
+  // through inheritance without compounding. Setting on body too
+  // multiplied 1.2 × 1.2 = 1.44 in the previous version. Setting
+  // 'zoom' on body broke layout because Zotero's column/pagination
+  // viewport doesn't rescale alongside it.
   if (state.fontScale != null) {
-    parts.push(`html body { zoom: ${state.fontScale} !important; }`);
+    parts.push(`html { font-size: ${state.fontScale}em !important; }`);
+    // Scale embedded media to the same factor — they don't inherit
+    // text scale, so without this they'd stay at original size.
+    parts.push(
+      `html body img, html body svg, html body video, ` +
+        `html body picture, html body canvas { ` +
+        `zoom: ${state.fontScale} !important; }`,
+    );
   }
 
   // Line height: unitless multiplier — safe to cascade to all descendants
