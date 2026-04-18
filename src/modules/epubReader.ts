@@ -263,11 +263,13 @@ function appendFontFamilyMenu(
 
     // Clamp to viewport: if the menu would overflow the right edge,
     // slide it left so its right edge sits inside the viewport.
-    const docWidth = doc.documentElement.clientWidth;
-    const menuRect = m.getBoundingClientRect();
-    if (menuRect.right > docWidth - 4) {
-      const adjustedLeft = Math.max(4, docWidth - menuRect.width - 4);
-      m.style.left = `${adjustedLeft}px`;
+    const docWidth = doc.documentElement?.clientWidth ?? 0;
+    if (docWidth > 0) {
+      const menuRect = m.getBoundingClientRect();
+      if (menuRect.right > docWidth - 4) {
+        const adjustedLeft = Math.max(4, docWidth - menuRect.width - 4);
+        m.style.left = `${adjustedLeft}px`;
+      }
     }
 
     outsideHandler = (ev: Event) => {
