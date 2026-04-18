@@ -132,6 +132,9 @@ function applyPersistedSettings(reader: AnyReader): void {
     if (settings.fontScale != null) {
       applyInlineFontSizeRecursive(h.contentDocument, settings.fontScale);
     }
+    if (settings.imageScale != null) {
+      applyInlineImageZoomRecursive(h.contentDocument, settings.imageScale);
+    }
   };
 
   const initPromise = handle.primaryView?.initializedPromise;
@@ -581,10 +584,51 @@ function adjustImageScale(reader: AnyReader, delta: number): void {
     Math.round(Math.max(0.3, Math.min(3.0, current + delta)) * 1000) / 1000;
   prefSetFloat(PREF_IMAGE_SCALE, next);
 
-  const count = applyStyles(handle.contentDocument, getSettings());
-  showStatus(
-    `圖片 ${current.toFixed(2)} → ${next.toFixed(2)} (注入到 ${count} 個文件)`,
+  const cssCount = applyStyles(handle.contentDocument, getSettings());
+  const inlineCount = applyInlineImageZoomRecursive(
+    handle.contentDocument,
+    next,
   );
+  showStatus(
+    `圖片 ${current.toFixed(2)} → ${next.toFixed(2)} ` +
+      `(CSS:${cssCount}, inline:${inlineCount})`,
+  );
+}
+
+function applyInlineImageZoomRecursive(doc: Document, zoom: number): number {
+  let count = 0;
+  try {
+    const all =
+      doc.body?.querySelectorAll("img, svg, video, picture, canvas") ?? [];
+    all.forEach((el: Element) => {
+      try {
+        (el as HTMLElement).style.setProperty(
+          "zoom",
+          String(zoom),
+          "important",
+        );
+        count++;
+      } catch {
+        /* skip element */
+      }
+    });
+  } catch {
+    /* skip doc */
+  }
+  try {
+    const iframes = doc.querySelectorAll("iframe");
+    iframes.forEach((iframe: Element) => {
+      try {
+        const sub = (iframe as HTMLIFrameElement).contentDocument;
+        if (sub) count += applyInlineImageZoomRecursive(sub, zoom);
+      } catch {
+        /* cross-origin */
+      }
+    });
+  } catch {
+    /* skip */
+  }
+  return count;
 }
 
 function adjustLineHeight(reader: AnyReader, delta: number): void {
@@ -723,6 +767,10 @@ function resetAllSettings(reader: AnyReader): void {
     inlineCleared += removeInlinePropertyRecursive(
       handle.contentDocument,
       "font-size",
+    );
+    inlineCleared += removeInlinePropertyRecursive(
+      handle.contentDocument,
+      "zoom",
     );
   }
 
