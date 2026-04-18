@@ -79,11 +79,13 @@ function onRenderToolbar(event: {
   const buttons: Array<[string, string, string, () => void]> = [
     ["ze-font-minus", "A−", "縮小書本內文字體 (步進 0.05)", () => adjustContentFontSize(reader, -0.05)],
     ["ze-font-plus", "A+", "放大書本內文字體 (步進 0.05)", () => adjustContentFontSize(reader, +0.05)],
+    ["ze-img-minus", "▭−", "縮小圖片 (步進 0.1)", () => adjustImageScale(reader, -0.1)],
+    ["ze-img-plus", "▭+", "放大圖片 (步進 0.1)", () => adjustImageScale(reader, +0.1)],
     ["ze-line-minus", "≡−", "縮小行距", () => adjustLineHeight(reader, -0.1)],
     ["ze-line-plus", "≡+", "放大行距", () => adjustLineHeight(reader, +0.1)],
     ["ze-flow-toggle", "⇅", "切換捲動 / 翻頁模式 (flowMode)", () => toggleFlowMode(reader)],
     ["ze-spread-toggle", "▤", "切換單頁 / 雙頁模式 (spreadMode)", () => toggleSpreadMode(reader)],
-    ["ze-reset", "↺", "重置所有自訂設定 (字體/行距/字型/版面模式)", () => resetAllSettings(reader)],
+    ["ze-reset", "↺", "重置所有自訂設定 (字體/圖片/行距/字型/版面模式)", () => resetAllSettings(reader)],
   ];
 
   for (const [id, label, title, onClick] of buttons) {
@@ -380,11 +382,13 @@ function appendButton(
  */
 interface ReaderStyleState {
   fontScale?: number;
+  imageScale?: number;
   fontFamily?: string;
   lineHeight?: number;
 }
 
 const PREF_FONT_SCALE = `${config.prefsPrefix}.fontScale`;
+const PREF_IMAGE_SCALE = `${config.prefsPrefix}.imageScale`;
 const PREF_LINE_HEIGHT = `${config.prefsPrefix}.lineHeight`;
 const PREF_FONT_FAMILY = `${config.prefsPrefix}.fontFamily`;
 
@@ -432,6 +436,7 @@ function getSettings(): ReaderStyleState {
   const fontFamily = prefGet(PREF_FONT_FAMILY);
   return {
     fontScale: prefGetFloat(PREF_FONT_SCALE),
+    imageScale: prefGetFloat(PREF_IMAGE_SCALE),
     lineHeight: prefGetFloat(PREF_LINE_HEIGHT),
     fontFamily:
       typeof fontFamily === "string" && fontFamily.length > 0
@@ -442,6 +447,7 @@ function getSettings(): ReaderStyleState {
 
 function clearAllSettings(): void {
   prefClear(PREF_FONT_SCALE);
+  prefClear(PREF_IMAGE_SCALE);
   prefClear(PREF_LINE_HEIGHT);
   prefClear(PREF_FONT_FAMILY);
 }
@@ -473,6 +479,24 @@ function adjustContentFontSize(reader: AnyReader, delta: number): void {
   const count = applyStyles(handle.contentDocument, getSettings());
   showStatus(
     `字體 ${current.toFixed(3)} → ${next.toFixed(3)} (注入到 ${count} 個文件)`,
+  );
+}
+
+function adjustImageScale(reader: AnyReader, delta: number): void {
+  const handle = getEpubHandle(reader);
+  if (!handle?.contentDocument) {
+    showStatus("無法取得 EPUB 內容 iframe (contentDocument null)");
+    return;
+  }
+  const settings = getSettings();
+  const current = settings.imageScale ?? 1;
+  const next =
+    Math.round(Math.max(0.3, Math.min(3.0, current + delta)) * 1000) / 1000;
+  prefSetFloat(PREF_IMAGE_SCALE, next);
+
+  const count = applyStyles(handle.contentDocument, getSettings());
+  showStatus(
+    `圖片 ${current.toFixed(2)} → ${next.toFixed(2)} (注入到 ${count} 個文件)`,
   );
 }
 
@@ -661,20 +685,23 @@ const STYLE_ID = "ze-content-style";
 function buildCss(state: ReaderStyleState): string {
   const parts: string[] = [];
 
-  // Font + media size: zoom each direct child of body. Why this
-  // particular shape:
-  //
-  // - 'html { font-size: Xem }' alone failed on image-heavy chapters
-  //   whose EPUB stylesheets use fixed px font sizes (px doesn't
-  //   inherit the new root size).
-  // - 'body { zoom: X }' rescaled the layout box but Zotero's column
-  //   viewport stayed put, so content overflowed.
-  // - 'body > * { zoom: X }' rescales each chapter wrapper (text,
-  //   images, padding all together — zoom is layout-aware), and
-  //   because we don't list nested elements there's no compounding
-  //   regardless of how deeply the EPUB nests its DOM.
+  // Font size — em-based on root only. Behavior is best-effort:
+  // EPUBs whose stylesheets use em/rem typography get scaled via
+  // inheritance; chapters with fixed-px font-size don't react.
+  // (User accepted that trade-off; image scaling is now a separate
+  // independent control via PREF_IMAGE_SCALE.)
   if (state.fontScale != null) {
-    parts.push(`html body > * { zoom: ${state.fontScale} !important; }`);
+    parts.push(`html { font-size: ${state.fontScale}em !important; }`);
+  }
+
+  // Image size — independent control. Layout-aware 'zoom' so figures
+  // reflow surrounding content instead of overlapping.
+  if (state.imageScale != null) {
+    parts.push(
+      `html body img, html body svg, html body video, ` +
+        `html body picture, html body canvas { ` +
+        `zoom: ${state.imageScale} !important; }`,
+    );
   }
 
   // Line height: unitless multiplier — safe to cascade to all descendants
