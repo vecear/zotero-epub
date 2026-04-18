@@ -977,15 +977,8 @@ function applyState(reader: any, field: string, value: any): string {
 }
 
 function showStatus(msg: string): void {
+  // Log to Zotero debug output only — UI popup was distracting during
+  // routine adjustments. Re-enable the ProgressWindow if a future
+  // operation needs visible confirmation.
   ztoolkit.log(`[${config.addonRef}] ${msg}`);
-  try {
-    new ztoolkit.ProgressWindow(config.addonName, {
-      closeOnClick: true,
-      closeTime: 3000,
-    })
-      .createLine({ text: msg, type: "default" })
-      .show();
-  } catch {
-    /* progress window best-effort */
-  }
 }
