@@ -203,10 +203,13 @@ function appendButton(
 ): void {
   const btn = doc.createElement("button");
   btn.id = id;
-  btn.className = "ze-tb";
+  // 'toolbar-button' is Zotero's reader-toolbar class; without it the React
+  // toolbar treats the first click as a focus event and only fires onClick
+  // on the second press. Keep it; layer 'ze-tb' for custom theming.
+  btn.className = "toolbar-button ze-tb";
   btn.title = title;
   btn.textContent = label;
-  btn.type = "button"; // prevent any implicit submit / focus-only behavior
+  btn.type = "button";
 
   btn.addEventListener("click", (e) => {
     e.preventDefault();
