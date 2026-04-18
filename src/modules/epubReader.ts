@@ -661,24 +661,12 @@ const STYLE_ID = "ze-content-style";
 function buildCss(state: ReaderStyleState): string {
   const parts: string[] = [];
 
-  // Font size: scope to root + first-level text elements only.
-  // Using a 'body *' wildcard for em-based scaling would compound
-  // through every nesting level (em is relative to parent), blowing up.
+  // Font + media size: apply 'zoom' once on html body. zoom rescales
+  // the entire layout box (text, images, padding, margins) by the
+  // factor in lock-step, so figure/photo dimensions match the text
+  // growth exactly — no compounded em stacking, no separate img rule.
   if (state.fontScale != null) {
-    parts.push(`html { font-size: ${state.fontScale}em !important; }`);
-    parts.push(
-      `html body, html body p, html body div, html body span, html body li, ` +
-        `html body td, html body th, html body blockquote { ` +
-        `font-size: ${state.fontScale}em !important; }`,
-    );
-    // Scale embedded media to match. 'zoom' is layout-aware (reflows
-    // surrounding content) so images don't overlap text the way
-    // transform:scale() would. Firefox supports it natively.
-    parts.push(
-      `html body img, html body svg, html body video, ` +
-        `html body picture, html body canvas { ` +
-        `zoom: ${state.fontScale} !important; }`,
-    );
+    parts.push(`html body { zoom: ${state.fontScale} !important; }`);
   }
 
   // Line height: unitless multiplier — safe to cascade to all descendants
