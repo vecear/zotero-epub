@@ -114,6 +114,7 @@ function ensureToolbarStyles(doc: Document): void {
       font-size: 13px;
       font-family: inherit;
       min-width: 30px;
+      white-space: nowrap;
       vertical-align: middle;
       transition: background-color 0.12s, border-color 0.12s, color 0.12s;
     }
@@ -216,7 +217,8 @@ function appendFontFamilyMenu(
     FONT_OPTIONS.find((o) => o[0] === value)?.[1] ?? "預設";
   const refreshLabel = () => {
     const cur = getReaderState(reader.itemID).fontFamily ?? "";
-    btn.textContent = `${labelOf(cur)} ▾`;
+    btn.textContent = "字型 ▾";
+    btn.title = `更換字型 (目前: ${labelOf(cur)})`;
   };
   refreshLabel();
 
