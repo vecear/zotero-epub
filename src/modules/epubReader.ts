@@ -671,6 +671,14 @@ function buildCss(state: ReaderStyleState): string {
         `html body td, html body th, html body blockquote { ` +
         `font-size: ${state.fontScale}em !important; }`,
     );
+    // Scale embedded media to match. 'zoom' is layout-aware (reflows
+    // surrounding content) so images don't overlap text the way
+    // transform:scale() would. Firefox supports it natively.
+    parts.push(
+      `html body img, html body svg, html body video, ` +
+        `html body picture, html body canvas { ` +
+        `zoom: ${state.fontScale} !important; }`,
+    );
   }
 
   // Line height: unitless multiplier — safe to cascade to all descendants
