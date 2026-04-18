@@ -112,7 +112,8 @@ function applyPersistedSettings(reader: AnyReader): void {
   if (!handle) return;
   const settings = getSettings();
   if (
-    settings.fontScale == null &&
+    settings.fontOffset == null &&
+    settings.imageScale == null &&
     settings.lineHeight == null &&
     settings.fontFamily == null
   ) {
@@ -858,10 +859,6 @@ function buildCss(state: ReaderStyleState): string {
   if (state.lineHeight != null) {
     parts.push(
       `html, html body, html body * { line-height: ${state.lineHeight} !important; }`,
-    );
-  } else if (state.fontScale != null) {
-    parts.push(
-      `html, html body, html body * { line-height: 1.6 !important; }`,
     );
   }
 
