@@ -129,6 +129,9 @@ function applyPersistedSettings(reader: AnyReader): void {
         String(settings.lineHeight),
       );
     }
+    if (settings.fontScale != null) {
+      applyInlineFontSizeRecursive(h.contentDocument, settings.fontScale);
+    }
   };
 
   const initPromise = handle.primaryView?.initializedPromise;
@@ -476,10 +479,94 @@ function adjustContentFontSize(reader: AnyReader, delta: number): void {
     Math.round(Math.max(0.5, Math.min(2.5, current + delta)) * 1000) / 1000;
   prefSetFloat(PREF_FONT_SCALE, next);
 
-  const count = applyStyles(handle.contentDocument, getSettings());
-  showStatus(
-    `字體 ${current.toFixed(3)} → ${next.toFixed(3)} (注入到 ${count} 個文件)`,
+  const cssCount = applyStyles(handle.contentDocument, getSettings());
+  // CSS approach (above) handles em/rem-based EPUBs; inline force
+  // (below) handles fixed-px stylesheets that ignore root em changes.
+  // Same belt-and-braces strategy as line-height.
+  const inlineCount = applyInlineFontSizeRecursive(
+    handle.contentDocument,
+    next,
   );
+  showStatus(
+    `字體 ${current.toFixed(3)} → ${next.toFixed(3)} ` +
+      `(CSS:${cssCount}, inline:${inlineCount})`,
+  );
+}
+
+const FONT_SIZE_TARGETS = new Set([
+  "BODY",
+  "P",
+  "DIV",
+  "SPAN",
+  "LI",
+  "TD",
+  "TH",
+  "BLOCKQUOTE",
+  "H1",
+  "H2",
+  "H3",
+  "H4",
+  "H5",
+  "H6",
+  "A",
+  "EM",
+  "STRONG",
+  "B",
+  "I",
+  "U",
+  "CITE",
+  "Q",
+  "FIGCAPTION",
+]);
+
+function applyInlineFontSizeRecursive(doc: Document, scale: number): number {
+  let count = 0;
+  try {
+    const view = (doc as any).defaultView;
+    const all = doc.body?.querySelectorAll("*") ?? [];
+    all.forEach((el: Element) => {
+      if (!FONT_SIZE_TARGETS.has(el.tagName)) return;
+      const html = el as HTMLElement;
+      try {
+        // Cache the element's original computed font-size on first
+        // touch — subsequent adjustments rebase from this anchor so
+        // we never compound or drift.
+        let original = parseFloat(html.dataset.zeOrigFontSize ?? "");
+        if (!Number.isFinite(original) || original <= 0) {
+          // Temporarily strip our inline override (if any) so the
+          // computed value reflects the EPUB's true CSS, then restore.
+          const prev = html.style.getPropertyValue("font-size");
+          html.style.removeProperty("font-size");
+          const computed = view?.getComputedStyle?.(el);
+          const sizeStr = computed?.fontSize ?? "16px";
+          original = parseFloat(sizeStr) || 16;
+          html.dataset.zeOrigFontSize = String(original);
+          if (prev) html.style.setProperty("font-size", prev, "important");
+        }
+        const target = original * scale;
+        html.style.setProperty("font-size", `${target}px`, "important");
+        count++;
+      } catch {
+        /* skip element */
+      }
+    });
+  } catch {
+    /* skip doc */
+  }
+  try {
+    const iframes = doc.querySelectorAll("iframe");
+    iframes.forEach((iframe: Element) => {
+      try {
+        const sub = (iframe as HTMLIFrameElement).contentDocument;
+        if (sub) count += applyInlineFontSizeRecursive(sub, scale);
+      } catch {
+        /* cross-origin */
+      }
+    });
+  } catch {
+    /* skip */
+  }
+  return count;
 }
 
 function adjustImageScale(reader: AnyReader, delta: number): void {
@@ -628,10 +715,14 @@ function resetAllSettings(reader: AnyReader): void {
   if (handle.contentDocument) {
     // 2. Wipe the injected stylesheet (buildCss({}) returns "").
     applyStyles(handle.contentDocument, {});
-    // 3. Remove the inline line-height we forced into every element.
-    inlineCleared = removeInlinePropertyRecursive(
+    // 3. Remove every inline override we forced into elements.
+    inlineCleared += removeInlinePropertyRecursive(
       handle.contentDocument,
       "line-height",
+    );
+    inlineCleared += removeInlinePropertyRecursive(
+      handle.contentDocument,
+      "font-size",
     );
   }
 
