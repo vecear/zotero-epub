@@ -77,8 +77,8 @@ function onRenderToolbar(event: {
   // clicks to be swallowed (likely Zotero React toolbar diff replacing the
   // wrapper). Keeping the proven single-button pattern from the probe.
   const buttons: Array<[string, string, string, () => void]> = [
-    ["ze-font-minus", "A−", "縮小書本內文字體 (步進 0.05)", () => adjustContentFontSize(reader, -0.05)],
-    ["ze-font-plus", "A+", "放大書本內文字體 (步進 0.05)", () => adjustContentFontSize(reader, +0.05)],
+    ["ze-font-minus", "A−", "字級 −1 px (相對 EPUB 原始大小，可精確互相抵銷)", () => adjustContentFontSize(reader, -1)],
+    ["ze-font-plus", "A+", "字級 +1 px (相對 EPUB 原始大小，可精確互相抵銷)", () => adjustContentFontSize(reader, +1)],
     ["ze-img-minus", "▭−", "縮小圖片 (步進 0.1)", () => adjustImageScale(reader, -0.1)],
     ["ze-img-plus", "▭+", "放大圖片 (步進 0.1)", () => adjustImageScale(reader, +0.1)],
     ["ze-line-minus", "≡−", "縮小行距", () => adjustLineHeight(reader, -0.1)],
@@ -129,10 +129,10 @@ function applyPersistedSettings(reader: AnyReader): void {
         String(settings.lineHeight),
       );
     }
-    if (settings.fontScale != null) {
-      applyInlineFontSizeRecursive(h.contentDocument, settings.fontScale);
+    if (settings.fontOffset != null && settings.fontOffset !== 0) {
+      applyInlineFontSizeRecursive(h.contentDocument, settings.fontOffset);
     }
-    if (settings.imageScale != null) {
+    if (settings.imageScale != null && settings.imageScale !== 1) {
       applyInlineImageZoomRecursive(h.contentDocument, settings.imageScale);
     }
   };
@@ -387,13 +387,16 @@ function appendButton(
  * by every EPUB the user opens.
  */
 interface ReaderStyleState {
-  fontScale?: number;
+  /** Absolute px offset added to each text element's original computed
+   *  font-size. Integer-valued so +N then -N always cancels exactly. */
+  fontOffset?: number;
   imageScale?: number;
   fontFamily?: string;
   lineHeight?: number;
 }
 
-const PREF_FONT_SCALE = `${config.prefsPrefix}.fontScale`;
+const PREF_FONT_OFFSET = `${config.prefsPrefix}.fontOffset`;
+const PREF_FONT_SCALE_LEGACY = `${config.prefsPrefix}.fontScale`; // cleared on reset; not read
 const PREF_IMAGE_SCALE = `${config.prefsPrefix}.imageScale`;
 const PREF_LINE_HEIGHT = `${config.prefsPrefix}.lineHeight`;
 const PREF_FONT_FAMILY = `${config.prefsPrefix}.fontFamily`;
@@ -440,8 +443,12 @@ function prefGetFloat(key: string): number | undefined {
 
 function getSettings(): ReaderStyleState {
   const fontFamily = prefGet(PREF_FONT_FAMILY);
+  const fontOffset = prefGetFloat(PREF_FONT_OFFSET);
   return {
-    fontScale: prefGetFloat(PREF_FONT_SCALE),
+    fontOffset:
+      fontOffset != null && Number.isFinite(fontOffset)
+        ? Math.round(fontOffset)
+        : undefined,
     imageScale: prefGetFloat(PREF_IMAGE_SCALE),
     lineHeight: prefGetFloat(PREF_LINE_HEIGHT),
     fontFamily:
@@ -452,7 +459,8 @@ function getSettings(): ReaderStyleState {
 }
 
 function clearAllSettings(): void {
-  prefClear(PREF_FONT_SCALE);
+  prefClear(PREF_FONT_OFFSET);
+  prefClear(PREF_FONT_SCALE_LEGACY);
   prefClear(PREF_IMAGE_SCALE);
   prefClear(PREF_LINE_HEIGHT);
   prefClear(PREF_FONT_FAMILY);
@@ -477,22 +485,19 @@ function adjustContentFontSize(reader: AnyReader, delta: number): void {
   }
 
   const settings = getSettings();
-  const current = settings.fontScale ?? 1;
-  const next =
-    Math.round(Math.max(0.5, Math.min(2.5, current + delta)) * 1000) / 1000;
-  prefSetFloat(PREF_FONT_SCALE, next);
+  const current = Math.round(settings.fontOffset ?? 0);
+  // Delta is signed integer (-1 / +1). Clamp ±20 px from the EPUB's
+  // own size; 0 means "EPUB default — exactly the original size".
+  const next = Math.max(-20, Math.min(40, current + Math.round(delta)));
+  prefSet(PREF_FONT_OFFSET, next);
 
-  const cssCount = applyStyles(handle.contentDocument, getSettings());
-  // CSS approach (above) handles em/rem-based EPUBs; inline force
-  // (below) handles fixed-px stylesheets that ignore root em changes.
-  // Same belt-and-braces strategy as line-height.
   const inlineCount = applyInlineFontSizeRecursive(
     handle.contentDocument,
     next,
   );
   showStatus(
-    `字體 ${current.toFixed(3)} → ${next.toFixed(3)} ` +
-      `(CSS:${cssCount}, inline:${inlineCount})`,
+    `字級偏移 ${current >= 0 ? "+" : ""}${current} → ` +
+      `${next >= 0 ? "+" : ""}${next} px (套用到 ${inlineCount} 個元素)`,
   );
 }
 
@@ -522,7 +527,10 @@ const FONT_SIZE_TARGETS = new Set([
   "FIGCAPTION",
 ]);
 
-function applyInlineFontSizeRecursive(doc: Document, scale: number): number {
+function applyInlineFontSizeRecursive(
+  doc: Document,
+  offsetPx: number,
+): number {
   let count = 0;
   try {
     const view = (doc as any).defaultView;
@@ -533,7 +541,7 @@ function applyInlineFontSizeRecursive(doc: Document, scale: number): number {
       try {
         // Cache the element's original computed font-size on first
         // touch — subsequent adjustments rebase from this anchor so
-        // we never compound or drift.
+        // +N then -N round-trips to exactly the original size.
         let original = parseFloat(html.dataset.zeOrigFontSize ?? "");
         if (!Number.isFinite(original) || original <= 0) {
           // Temporarily strip our inline override (if any) so the
@@ -546,8 +554,13 @@ function applyInlineFontSizeRecursive(doc: Document, scale: number): number {
           html.dataset.zeOrigFontSize = String(original);
           if (prev) html.style.setProperty("font-size", prev, "important");
         }
-        const target = original * scale;
-        html.style.setProperty("font-size", `${target}px`, "important");
+        if (offsetPx === 0) {
+          // Default — drop the inline override so the EPUB's own size shows.
+          html.style.removeProperty("font-size");
+        } else {
+          const target = Math.max(1, original + offsetPx);
+          html.style.setProperty("font-size", `${target}px`, "important");
+        }
         count++;
       } catch {
         /* skip element */
@@ -561,7 +574,7 @@ function applyInlineFontSizeRecursive(doc: Document, scale: number): number {
     iframes.forEach((iframe: Element) => {
       try {
         const sub = (iframe as HTMLIFrameElement).contentDocument;
-        if (sub) count += applyInlineFontSizeRecursive(sub, scale);
+        if (sub) count += applyInlineFontSizeRecursive(sub, offsetPx);
       } catch {
         /* cross-origin */
       }
@@ -824,14 +837,10 @@ const STYLE_ID = "ze-content-style";
 function buildCss(state: ReaderStyleState): string {
   const parts: string[] = [];
 
-  // Font size — em-based on root only. Behavior is best-effort:
-  // EPUBs whose stylesheets use em/rem typography get scaled via
-  // inheritance; chapters with fixed-px font-size don't react.
-  // (User accepted that trade-off; image scaling is now a separate
-  // independent control via PREF_IMAGE_SCALE.)
-  if (state.fontScale != null) {
-    parts.push(`html { font-size: ${state.fontScale}em !important; }`);
-  }
+  // Font size: applied entirely via inline force in
+  // applyInlineFontSizeRecursive (target = original + fontOffset px).
+  // No CSS rule needed — inline !important always wins and the
+  // offset model lets +N then -N cancel exactly.
 
   // Image size — independent control. Layout-aware 'zoom' so figures
   // reflow surrounding content instead of overlapping.
