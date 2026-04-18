@@ -83,6 +83,7 @@ function onRenderToolbar(event: {
     ["ze-line-plus", "≡+", "放大行距", () => adjustLineHeight(reader, +0.1)],
     ["ze-flow-toggle", "⇅", "切換捲動 / 翻頁模式 (flowMode)", () => toggleFlowMode(reader)],
     ["ze-spread-toggle", "▤", "切換單頁 / 雙頁模式 (spreadMode)", () => toggleSpreadMode(reader)],
+    ["ze-reset", "↺", "重置所有自訂設定 (字體/行距/字型/版面模式)", () => resetAllSettings(reader)],
   ];
 
   for (const [id, label, title, onClick] of buttons) {
@@ -230,6 +231,7 @@ function appendFontFamilyMenu(
     btn.title = `更換字型 (目前: ${labelOf(cur)})`;
   };
   refreshLabel();
+  readerLabelRefreshers.set(reader.itemID ?? -1, refreshLabel);
 
   let menuEl: HTMLDivElement | null = null;
   let outsideHandler: ((ev: Event) => void) | null = null;
@@ -345,6 +347,12 @@ interface ReaderStyleState {
 }
 const readerStyles: Map<number, ReaderStyleState> = new Map();
 
+/**
+ * Per-reader hooks to refresh derived UI (e.g. font dropdown label).
+ * Populated when the reader's toolbar is built; called on reset.
+ */
+const readerLabelRefreshers: Map<number, () => void> = new Map();
+
 function getReaderState(itemID: number | undefined): ReaderStyleState {
   const key = itemID ?? -1;
   let s = readerStyles.get(key);
@@ -451,6 +459,89 @@ function applyInlineLineHeightRecursive(doc: Document, lh: string): number {
     /* skip */
   }
   return count;
+}
+
+function removeInlinePropertyRecursive(doc: Document, prop: string): number {
+  let count = 0;
+  try {
+    const root = doc.documentElement as HTMLElement | null;
+    root?.style?.removeProperty(prop);
+    const body = doc.body as HTMLElement | null;
+    body?.style?.removeProperty(prop);
+
+    const all = doc.body?.querySelectorAll("*") ?? [];
+    all.forEach((el: Element) => {
+      try {
+        (el as HTMLElement).style.removeProperty(prop);
+        count++;
+      } catch {
+        /* skip */
+      }
+    });
+  } catch {
+    /* skip */
+  }
+  try {
+    const iframes = doc.querySelectorAll("iframe");
+    iframes.forEach((iframe: Element) => {
+      try {
+        const sub = (iframe as HTMLIFrameElement).contentDocument;
+        if (sub) count += removeInlinePropertyRecursive(sub, prop);
+      } catch {
+        /* skip */
+      }
+    });
+  } catch {
+    /* skip */
+  }
+  return count;
+}
+
+/**
+ * Reset everything our plugin can touch back to the reader's defaults:
+ *   - Clear injected CSS (font-size, line-height, font-family)
+ *   - Strip inline 'line-height' that we forced earlier
+ *   - flowMode → "paginated", spreadMode → 0
+ *   - Refresh font dropdown label so it shows the default again
+ */
+function resetAllSettings(reader: AnyReader): void {
+  const handle = getEpubHandle(reader);
+  if (!handle) {
+    showStatus("不是 EPUB reader");
+    return;
+  }
+  const itemID = reader.itemID ?? -1;
+
+  // 1. Forget per-reader styling state.
+  readerStyles.delete(itemID);
+
+  let inlineCleared = 0;
+  if (handle.contentDocument) {
+    // 2. Wipe the injected stylesheet (buildCss({}) returns "").
+    applyStyles(handle.contentDocument, {});
+    // 3. Remove the inline line-height we forced into every element.
+    inlineCleared = removeInlinePropertyRecursive(
+      handle.contentDocument,
+      "line-height",
+    );
+  }
+
+  // 4. Reset Zotero-native modes back to single-page paginated default.
+  const r: any = handle.internalReader;
+  let flowPath = "skip";
+  let spreadPath = "skip";
+  if (r) {
+    flowPath = applyState(r, "flowMode", "paginated");
+    spreadPath = applyState(r, "spreadMode", 0);
+  }
+
+  // 5. Refresh font dropdown label so it shows the default again.
+  readerLabelRefreshers.get(itemID)?.();
+
+  showStatus(
+    `已重置 (line-height inline 清除: ${inlineCleared}, ` +
+      `flowMode: ${flowPath}, spreadMode: ${spreadPath})`,
+  );
 }
 
 function sampleComputedLineHeight(doc: Document): string {
