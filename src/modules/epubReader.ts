@@ -88,8 +88,8 @@ function onRenderToolbar(event: {
     appendButton(doc, append, id, label, title, onClick);
   }
 
-  if (!doc.getElementById("ze-font-family-select")) {
-    appendFontFamilySelect(doc, append, reader);
+  if (!doc.getElementById("ze-font-family-btn")) {
+    appendFontFamilyMenu(doc, append, reader);
   }
 
   ztoolkit.log(
@@ -126,20 +126,42 @@ function ensureToolbarStyles(doc: Document): void {
     .ze-tb:active {
       background-color: rgba(127, 127, 127, 0.34);
     }
-    select.ze-tb {
-      padding: 3px 6px;
-      margin-left: 6px;
-      min-width: 110px;
-    }
-    select.ze-tb option {
-      color: #222;
+    .ze-font-menu {
+      position: fixed;
+      z-index: 99999;
       background: #fff;
+      color: #222;
+      border: 1px solid #888;
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+      min-width: 160px;
+      max-height: 60vh;
+      overflow-y: auto;
+      padding: 4px 0;
     }
     @media (prefers-color-scheme: dark) {
-      select.ze-tb option {
-        color: #e6e6ec;
+      .ze-font-menu {
         background: #2a2a30;
+        color: #e6e6ec;
+        border-color: #555;
       }
+    }
+    .ze-font-menu-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 6px 14px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font: 13px inherit;
+      color: inherit;
+    }
+    .ze-font-menu-item:hover {
+      background: rgba(127, 127, 127, 0.22);
+    }
+    .ze-font-menu-item[aria-checked="true"] {
+      font-weight: bold;
     }
   `;
   doc.head?.appendChild(style);
@@ -159,56 +181,95 @@ const FONT_OPTIONS: Array<[string, string]> = [
   ['sans-serif', "系統 Sans-serif"],
 ];
 
-function appendFontFamilySelect(
+/**
+ * Custom font-family menu (replaces native <select>).
+ *
+ * Why: Native <select> dropdown opens on mousedown only when the element
+ * is already focused. In Zotero's React-controlled reader toolbar the
+ * first click is consumed as focus, so the menu requires a second click.
+ * select.showPicker() would solve this but landed in Firefox 121 — Zotero
+ * 9 still rides the Firefox 115 ESR Gecko, so it's unavailable.
+ *
+ * Solution: a button (single-click thanks to .toolbar-button class) that
+ * builds an absolute-positioned popup attached to document.body.
+ */
+function appendFontFamilyMenu(
   doc: Document,
   append: (el: Element) => void,
   reader: AnyReader,
 ): void {
-  const select = doc.createElement("select");
-  select.id = "ze-font-family-select";
-  select.title = "更換字型";
-  select.className = "ze-tb";
-  select.tabIndex = 0;
+  const btn = doc.createElement("button");
+  btn.id = "ze-font-family-btn";
+  btn.className = "toolbar-button ze-tb";
+  btn.title = "更換字型";
+  btn.type = "button";
 
-  for (const [value, label] of FONT_OPTIONS) {
-    const opt = doc.createElement("option");
-    opt.value = value;
-    opt.textContent = label;
-    select.appendChild(opt);
-  }
-
-  // Reflect current state if reader was previously styled
-  const current = getReaderState(reader.itemID).fontFamily ?? "";
-  select.value = current;
-
-  // Workaround: Zotero React toolbar consumes the first click as focus,
-  // so the dropdown only opens on second click. Force focus on mousedown
-  // (capture phase) so the same gesture both focuses and opens the menu.
-  select.addEventListener(
-    "mousedown",
-    () => {
-      if (doc.activeElement !== select) {
-        try {
-          select.focus({ preventScroll: true });
-        } catch {
-          /* ignore */
-        }
-      }
-    },
-    true,
-  );
-
-  // React-controlled toolbars sometimes drop 'change'; listen to both.
-  const onChange = () => {
-    ztoolkit.log(
-      `[${config.addonRef}] font select changed -> ${select.value}`,
-    );
-    setContentFontFamily(reader, select.value);
+  const labelOf = (value: string) =>
+    FONT_OPTIONS.find((o) => o[0] === value)?.[1] ?? "預設";
+  const refreshLabel = () => {
+    const cur = getReaderState(reader.itemID).fontFamily ?? "";
+    btn.textContent = `${labelOf(cur)} ▾`;
   };
-  select.addEventListener("change", onChange);
-  select.addEventListener("input", onChange);
+  refreshLabel();
 
-  append(select);
+  let menuEl: HTMLDivElement | null = null;
+  let outsideHandler: ((ev: Event) => void) | null = null;
+
+  const closeMenu = () => {
+    menuEl?.remove();
+    menuEl = null;
+    if (outsideHandler) {
+      doc.removeEventListener("click", outsideHandler, true);
+      outsideHandler = null;
+    }
+  };
+
+  const openMenu = () => {
+    closeMenu();
+    const rect = btn.getBoundingClientRect();
+    const m = doc.createElement("div");
+    m.className = "ze-font-menu";
+    m.style.top = `${rect.bottom + 2}px`;
+    m.style.left = `${rect.left}px`;
+
+    const currentValue = getReaderState(reader.itemID).fontFamily ?? "";
+    for (const [value, label] of FONT_OPTIONS) {
+      const item = doc.createElement("button");
+      item.type = "button";
+      item.className = "ze-font-menu-item";
+      item.textContent = label;
+      if (value === currentValue) item.setAttribute("aria-checked", "true");
+      item.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setContentFontFamily(reader, value);
+        refreshLabel();
+        closeMenu();
+      });
+      m.appendChild(item);
+    }
+    doc.body?.appendChild(m);
+    menuEl = m;
+
+    outsideHandler = (ev: Event) => {
+      const target = ev.target as Node;
+      if (m.contains(target) || btn.contains(target)) return;
+      closeMenu();
+    };
+    // Defer registration so this same click doesn't immediately close us.
+    setTimeout(() => {
+      if (outsideHandler) doc.addEventListener("click", outsideHandler, true);
+    }, 0);
+  };
+
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (menuEl) closeMenu();
+    else openMenu();
+  });
+
+  append(btn);
 }
 
 function appendButton(
