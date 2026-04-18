@@ -615,12 +615,41 @@ function applyInlineImageZoomRecursive(doc: Document, zoom: number): number {
     const all =
       doc.body?.querySelectorAll("img, svg, video, picture, canvas") ?? [];
     all.forEach((el: Element) => {
+      const html = el as HTMLElement;
       try {
-        (el as HTMLElement).style.setProperty(
-          "zoom",
-          String(zoom),
-          "important",
-        );
+        // zoom === 1 means "back to original" — clean up everything we
+        // ever wrote on this element, including the cached width.
+        if (zoom === 1) {
+          html.style.removeProperty("zoom");
+          if (html.dataset.zeOrigW) {
+            html.style.removeProperty("width");
+            html.style.removeProperty("height");
+            delete html.dataset.zeOrigW;
+          }
+          count++;
+          return;
+        }
+
+        // Belt: layout-aware zoom (works for elements that respect it).
+        html.style.setProperty("zoom", String(zoom), "important");
+
+        // Braces: cache the element's original rendered width once and
+        // force inline width = original × zoom. Beats EPUB stylesheets
+        // that pin 'img { width: 100% !important }' or similar.
+        let origW = parseFloat(html.dataset.zeOrigW ?? "");
+        if (!Number.isFinite(origW) || origW <= 0) {
+          if (el.tagName === "IMG") {
+            origW = (el as HTMLImageElement).naturalWidth;
+          }
+          if (!origW || origW <= 0) {
+            origW = html.getBoundingClientRect().width;
+          }
+          if (origW > 0) html.dataset.zeOrigW = String(origW);
+        }
+        if (origW > 0) {
+          html.style.setProperty("width", `${origW * zoom}px`, "important");
+          html.style.setProperty("height", "auto", "important");
+        }
         count++;
       } catch {
         /* skip element */
@@ -782,10 +811,10 @@ function resetAllSettings(reader: AnyReader): void {
       handle.contentDocument,
       "font-size",
     );
-    inlineCleared += removeInlinePropertyRecursive(
-      handle.contentDocument,
-      "zoom",
-    );
+    // Image cleanup uses the zoom=1 branch in applyInlineImageZoomRecursive
+    // so we only undo our own width/height/zoom inline styles, never the
+    // EPUB's own inline sizing on tables/figures/etc.
+    inlineCleared += applyInlineImageZoomRecursive(handle.contentDocument, 1);
   }
 
   // 4. Reset Zotero-native modes back to single-page paginated default.
