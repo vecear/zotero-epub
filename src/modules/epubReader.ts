@@ -1017,8 +1017,37 @@ function toggleFlowMode(reader: AnyReader): void {
 }
 
 /**
+ * Whether this EPUB's content is vertical-writing (中式直書 / 縦書き).
+ * Mirrors Zotero's native isVertical() in src/dom/common/lib/nodes.ts:
+ * the computed writing-mode of the content body starts with "vertical-".
+ */
+function isVerticalContent(doc: Document): boolean {
+  try {
+    // view cast through any — matches sampleComputedLineHeight; the project's
+    // tsconfig narrows doc.defaultView as nullable and getComputedStyle as
+    // possibly-null, which strict mode rejects without the cast.
+    const view = doc.defaultView as any;
+    const body = doc.body;
+    if (!view || !body) return false;
+    const wm = view.getComputedStyle(body)?.writingMode as string | undefined;
+    return typeof wm === "string" && wm.startsWith("vertical-");
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Toggle spreadMode between 0 and 1 (single ↔ double-page).
  * Earlier cycle through 0/1/2 failed past 1 — Zotero may only support 0/1.
+ *
+ * Vertical books: Zotero's native two-page spread is a viewport-width CSS
+ * multi-column split (`.spread-mode-odd { column-width: calc(50vw - 80px) }`)
+ * with no writing-mode awareness. For 直式 (writing-mode: vertical-*) EPUBs the
+ * native flow paginates along the vertical axis instead, so the spread CSS
+ * can't realize a two-page layout — setting spreadMode just silently no-ops.
+ * This is an acknowledged Zotero layout-engine limitation (vertical EPUBs are
+ * only supported in Scrolled mode). Surface it with a clear message rather than
+ * failing silently — same self-diagnostic pattern as adjustImageScale.
  */
 function toggleSpreadMode(reader: AnyReader): void {
   const handle = getEpubHandle(reader);
@@ -1029,6 +1058,27 @@ function toggleSpreadMode(reader: AnyReader): void {
   const r: any = handle.internalReader;
   const before = r.spreadMode;
   const target = typeof before === "number" ? (before === 0 ? 1 : 0) : !before;
+  const enabling = target === 1 || target === true;
+
+  // Only intercept when turning spread ON for a vertical book; turning it back
+  // off is always allowed.
+  if (enabling && handle.contentDocument && isVerticalContent(handle.contentDocument)) {
+    showStatus("直式書不支援同螢幕兩頁 (Zotero 排版引擎限制)");
+    try {
+      (Zotero as any)
+        .getMainWindow()
+        ?.alert(
+          "[zotero-epub] 這是直式（中式直書）EPUB，無法使用「同螢幕兩頁」。\n\n" +
+            "Zotero 的雙頁排版是以視窗寬度切成兩欄的水平 multi-column，\n" +
+            "排版引擎本身不支援直式書的分頁雙頁\n" +
+            "（官方僅在「捲動模式」支援直式書）。\n\n" +
+            "建議：按工具列的 ⇅ 切到捲動模式來閱讀此書。",
+        );
+    } catch {
+      /* alert is best-effort */
+    }
+    return;
+  }
 
   const path = applyState(r, "spreadMode", target);
   const after = r.spreadMode;

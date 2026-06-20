@@ -116,6 +116,7 @@ Bootstrap plugin 模式，hook Zotero 9 內建 reader：
 ## ⚠️ 已知限制
 
 - **flowMode / spreadMode 不持久化**：Zotero 9 reader 自身 cache 此狀態，重複寫入可能衝突，故只支援即時切換，不寫入 prefs。
+- **直式（中式直書）EPUB 不支援同螢幕兩頁**：雙頁是 Zotero 原生功能，以視窗寬度切兩欄的水平 multi-column 實作，排版引擎不支援直式書的分頁雙頁（官方僅在捲動模式支援直式書）。對直式書按 **▤** 會彈 alert 說明並建議改用 **⇅** 捲動模式，不再靜默失效。
 - **圖片 zoom 失敗時會彈 alert**：self-diagnostic 協助除錯（例如 EPUB 圖在 shadow DOM 無法存取）。正常使用不會觸發。
 - **多人共用 profile 的 annotation「bookmark」tag 會混在普通標註裡**：是設計選擇（享用內建同步），若要嚴格區分請使用專用 color。
 

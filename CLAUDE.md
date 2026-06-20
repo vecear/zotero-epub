@@ -99,6 +99,20 @@ default-value branch.
   `zoom: X`, `width: (origW × X)px`, `max-width: none`, `max-height: none`.
   Set `height: auto` to preserve aspect ratio.
 
+### Spread mode (雙頁) — vertical books are an upstream dead end
+
+- Two-page spread is **Zotero-native**, not ours — `toggleSpreadMode` only sets
+  `internalReader.spreadMode = 1`. The native layout is the CSS class
+  `.spread-mode-odd { column-width: calc(50vw − 80px) }`, a viewport-WIDTH
+  horizontal multi-column split with **no writing-mode awareness**.
+- For 直式 (`writing-mode: vertical-*`) EPUBs the native flow paginates on the
+  vertical axis, so the horizontal-spread CSS silently no-ops. Per Zotero devs
+  this is a layout-engine limitation — vertical books are only supported in
+  **Scrolled** mode. Don't try to hand-roll vertical two-page CSS; you'd be
+  fighting the native paginator and lose. `toggleSpreadMode` detects vertical
+  via `isVerticalContent()` (mirrors native `isVertical`: body computed
+  `writing-mode` starts with `vertical-`) and shows a diagnostic alert instead.
+
 ### Numeric precision
 
 - Font size must be **integer px offset**, never a ratio. `×1.1 ×1/1.1` does
